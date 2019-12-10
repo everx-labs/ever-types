@@ -6,7 +6,7 @@ G_test = "none"
 
 pipeline {
     options {
-        buildDiscarder logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '', daysToKeepStr: '', numToKeepStr: '1')
+        buildDiscarder logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '', daysToKeepStr: '', numToKeepStr: '10')
         disableConcurrentBuilds()
         parallelsAlwaysFailFast()
     }
