@@ -14,15 +14,14 @@
 
 use GasConsumer;
 use super::{HashmapType, HashmapRemover, Leaf, hm_label, ADD, REPLACE};
-use super::{BuilderData, CellData, IBitstring, SliceData};
+use super::{BuilderData, Cell, IBitstring, SliceData};
 use std::fmt;
-use std::sync::Arc;
 use types::{Result};
 
 #[derive(Clone, Debug)]
 pub struct PfxHashmapE {
     bit_len: usize,
-    data: Option<Arc<CellData>>,
+    data: Option<Cell>,
 }
 
 #[cfg_attr(rustfmt, rustfmt_skip)]
@@ -45,10 +44,10 @@ impl PfxHashmapE {
         Self::with_hashmap(bit_len, data.reference(0).ok())
     }
     /// construct with bit_len and root representing Hashmap
-    pub fn with_hashmap(bit_len: usize, data: Option<&Arc<CellData>>) -> Self {
+    pub fn with_hashmap(bit_len: usize, data: Option<Cell>) -> Self {
         Self {
             bit_len,
-            data: data.cloned()
+            data: data
         }
     }
     /// gets value from hahsmap
@@ -69,13 +68,13 @@ impl PfxHashmapE {
         self.hashmap_set_with_mode::<Self>(key, value, gas_consumer, REPLACE)
     }
     /// sets value as reference in empty SliceData
-    pub fn setref(&mut self, key: SliceData, value: &Arc<CellData>) -> Leaf {
+    pub fn setref(&mut self, key: SliceData, value: &Cell) -> Leaf {
         self.hashmap_setref_with_mode::<Self>(key, value, &mut 0, ADD | REPLACE)
     }
-    pub fn setref_with_gas(&mut self, key: SliceData, value: &Arc<CellData>, gas_consumer: &mut dyn GasConsumer) -> Leaf {
+    pub fn setref_with_gas(&mut self, key: SliceData, value: &Cell, gas_consumer: &mut dyn GasConsumer) -> Leaf {
         self.hashmap_setref_with_mode::<Self>(key, value, gas_consumer, ADD | REPLACE)
     }
-    pub fn replaceref_with_gas(&mut self, key: SliceData, value: &Arc<CellData>, gas_consumer: &mut dyn GasConsumer) -> Leaf {
+    pub fn replaceref_with_gas(&mut self, key: SliceData, value: &Cell, gas_consumer: &mut dyn GasConsumer) -> Leaf {
         self.hashmap_setref_with_mode::<Self>(key, value, gas_consumer, REPLACE)
     }
     /// removes item
@@ -121,7 +120,7 @@ impl PfxHashmapE {
         }
         let mut bit_len = self.bit_len;
         let mut path =  BuilderData::default();
-        let mut cursor = SliceData::from_cell(self.data().unwrap(), gas_consumer);
+        let mut cursor = SliceData::from_cell_ref(self.data().unwrap(), gas_consumer);
         let mut label = cursor.get_label(bit_len);
         loop {
             path.checked_append_references_and_data(&label)?;
@@ -235,10 +234,10 @@ impl HashmapType for PfxHashmapE {
     fn is_leaf(slice: &mut SliceData) -> bool {
         !slice.is_empty() && !slice.get_next_bit().unwrap()
     }
-    fn data(&self) -> Option<&Arc<CellData>> {
+    fn data(&self) -> Option<&Cell> {
         self.data.as_ref()
     }
-    fn data_mut(&mut self) -> &mut Option<Arc<CellData>> {
+    fn data_mut(&mut self) -> &mut Option<Cell> {
         &mut self.data
     }
     fn bit_len(&self) -> usize {

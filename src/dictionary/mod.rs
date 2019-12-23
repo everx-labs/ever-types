@@ -13,9 +13,8 @@
 */
 
 use GasConsumer;
-use {BuilderData, CellData, IBitstring, SliceData};
+use {BuilderData, Cell, IBitstring, SliceData};
 use std::cmp;
-use std::sync::Arc;
 use types::{ExceptionCode, Result};
 use Mask;
 
@@ -177,7 +176,7 @@ fn order_greater(a: &SliceData, b: &SliceData) -> bool {
 }
 
 fn find_leaf<T: HashmapType>(
-    cell: Option<&Arc<CellData>>,
+    cell: Option<Cell>,
     bit_len: usize,
     mut key: SliceData,
     next: bool,
@@ -278,7 +277,7 @@ fn find_leaf<T: HashmapType>(
     Ok((None, None))
 }
 
-pub(crate) fn get_min<T: HashmapType>(cell: Option<&Arc<CellData>>, bit_len: usize, max_len: usize, signed: bool, gas_consumer: &mut dyn GasConsumer) -> KeyLeaf {
+pub(crate) fn get_min<T: HashmapType>(cell: Option<Cell>, bit_len: usize, max_len: usize, signed: bool, gas_consumer: &mut dyn GasConsumer) -> KeyLeaf {
     if let Some(cell) = cell {
         let mut root = SliceData::from_cell(cell, gas_consumer);
         if signed && root.clone().get_label(bit_len).is_empty() {
@@ -299,7 +298,7 @@ pub(crate) fn get_min<T: HashmapType>(cell: Option<&Arc<CellData>>, bit_len: usi
     }
 }
 
-pub(crate) fn get_max<T: HashmapType>(cell: Option<&Arc<CellData>>, bit_len: usize, max_len: usize, signed: bool, gas_consumer: &mut dyn GasConsumer) -> KeyLeaf {
+pub(crate) fn get_max<T: HashmapType>(cell: Option<Cell>, bit_len: usize, max_len: usize, signed: bool, gas_consumer: &mut dyn GasConsumer) -> KeyLeaf {
     if let Some(cell) = cell {
         let mut root = SliceData::from_cell(cell, gas_consumer);
         if signed && root.clone().get_label(bit_len).is_empty() {
@@ -333,7 +332,7 @@ pub trait HashmapType {
     }
     fn read_hashmap_data(&mut self, slice: &mut SliceData) -> Result<()> {
         let data = slice.get_dictionary()?;
-        *self.data_mut() = data.reference(0).ok().cloned();
+        *self.data_mut() = data.reference(0).ok();
         Ok(())
     }
     fn is_empty(&self) -> bool {
@@ -371,8 +370,8 @@ pub trait HashmapType {
         }
         Ok((None, None))
     }
-    fn data(&self) -> Option<&Arc<CellData>>;
-    fn data_mut(&mut self) -> &mut Option<Arc<CellData>>;
+    fn data(&self) -> Option<&Cell>;
+    fn data_mut(&mut self) -> &mut Option<Cell>;
     fn bit_len(&self) -> usize;
     fn bit_len_mut(&mut self) -> &mut usize;
     fn hashmap_get(&self, mut key: SliceData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
@@ -380,7 +379,7 @@ pub trait HashmapType {
         if self.is_empty() || key.is_empty() || !Self::check_key(bit_len, &key) {
             return Ok(None)
         }
-        let mut cursor = SliceData::from_cell(self.data().unwrap(), gas_consumer);
+        let mut cursor = SliceData::from_cell_ref(self.data().unwrap(), gas_consumer);
         let mut label = cursor.get_label(bit_len);
         while key.erase_prefix(&label) && !key.is_empty() {
             if !Self::is_fork(&mut cursor)? {
@@ -423,7 +422,7 @@ pub trait HashmapType {
     fn hashmap_setref_with_mode<T: HashmapType>(
         &mut self,
         key: SliceData,
-        value: &Arc<CellData>,
+        value: &Cell,
         gas_consumer: &mut dyn GasConsumer,
         mode: u8
     ) -> Leaf {
@@ -522,7 +521,7 @@ fn put_to_fork_with_mode<T: HashmapType>(
 
 /// Continues or finishes search of place
 fn put_to_node_with_mode<T: HashmapType>(
-    cell: &mut Arc<CellData>,
+    cell: &mut Cell,
     bit_len: usize,
     key: SliceData,
     leaf: &SliceData,
@@ -530,7 +529,7 @@ fn put_to_node_with_mode<T: HashmapType>(
     mode: u8
 ) -> Leaf {
     let mut result = Ok(None);
-    let mut slice = SliceData::from_cell(cell, gas_consumer);
+    let mut slice = SliceData::from_cell_ref(cell, gas_consumer);
     let label = slice.get_label(bit_len);
     if label == key {
         // replace existing leaf
@@ -632,13 +631,13 @@ fn slice_edge<T: HashmapType>(
 
 // remove method
 fn remove_node<T: HashmapType>(
-    cell: &mut Arc<CellData>,
+    cell: &mut Cell,
     bit_len: usize,
     prefix: SliceData,
     mut key: SliceData,
     gas_consumer: &mut dyn GasConsumer
 ) -> Leaf {
-    if cell.references_used() != 2 {
+    if cell.references_count() != 2 {
         debug_assert!(false);
         return Ok(None)
     }
@@ -658,11 +657,11 @@ fn remove_node<T: HashmapType>(
         )?.finalize(gas_consumer);
         return Ok(result);
     }
-    let mut references = cell.references()[..2].to_vec();
+    let mut references = vec![cell.reference(0).unwrap().clone(), cell.reference(1).unwrap().clone()];
     let result = remove_fork::<T>(&mut references[next_index], length, label, key, gas_consumer);
 
     let mut builder = BuilderData::new();
-    builder.append_raw(cell.data(), cell.calc_bit_length())?;
+    builder.append_raw(cell.data(), cell.bit_length())?;
     for r in references {
         builder.append_reference_cell(r);
     }
@@ -672,7 +671,7 @@ fn remove_node<T: HashmapType>(
 }
 // label is empty or fully in key
 fn remove_fork<T: HashmapType>(
-    cell: &mut Arc<CellData>,
+    cell: &mut Cell,
     bit_len: usize,
     label: SliceData,
     key: SliceData,
@@ -692,7 +691,7 @@ pub trait HashmapRemover: HashmapType {
             return Ok(None)
         }
         let mut root = self.data().unwrap().clone();
-        let mut leaf = SliceData::from_cell(&root, gas_consumer);
+        let mut leaf = SliceData::from_cell(root.clone(), gas_consumer);
         let label = leaf.get_label(bit_len);
         let result;
         *self.data_mut() = if label == key && T::is_leaf(&mut leaf) {
@@ -707,11 +706,11 @@ pub trait HashmapRemover: HashmapType {
     }
 }
 
-fn remove_except_prefix<T: HashmapType>(cell: &mut Arc<CellData>, bit_len: usize, prev_common: SliceData, mut prefix: SliceData, gas_consumer: &mut dyn GasConsumer) -> bool {
+fn remove_except_prefix<T: HashmapType>(cell: &mut Cell, bit_len: usize, prev_common: SliceData, mut prefix: SliceData, gas_consumer: &mut dyn GasConsumer) -> bool {
     debug_assert!(!prefix.is_empty());
 
     let next_index = prefix.get_next_bit_int().unwrap();
-    let mut next = match cell.references_used() >= next_index {
+    let mut next = match cell.references_count() >= next_index {
         true => SliceData::from_cell(cell.reference(next_index).unwrap(), gas_consumer),
         false => return false
     };
@@ -736,9 +735,9 @@ fn remove_except_prefix<T: HashmapType>(cell: &mut Arc<CellData>, bit_len: usize
     }
 }
 
-fn remove_with_prefix<T: HashmapType>(cell: &mut Arc<CellData>, bit_len: usize, prev_common: SliceData, mut prefix: SliceData, gas_consumer: &mut dyn GasConsumer) -> bool {
+fn remove_with_prefix<T: HashmapType>(cell: &mut Cell, bit_len: usize, prev_common: SliceData, mut prefix: SliceData, gas_consumer: &mut dyn GasConsumer) -> bool {
     let next_index = prefix.get_next_bit_int().unwrap();
-    let mut next = match cell.references_used() >= next_index {
+    let mut next = match cell.references_count() >= next_index {
         true => SliceData::from_cell(cell.reference(next_index).unwrap(), gas_consumer),
         false => return false
     };
@@ -762,7 +761,7 @@ fn hashmap_into_subtree_with_prefix<T: HashmapType>(tree: &mut T, prefix: SliceD
     let bit_len = tree.bit_len();
     debug_assert!(bit_len >= prefix.remaining_bits());
     if !prefix.is_empty() && !tree.is_empty() && bit_len >= prefix.remaining_bits() {
-        let mut root = SliceData::from_cell(tree.data().unwrap(), gas_consumer);
+        let mut root = SliceData::from_cell_ref(tree.data().unwrap(), gas_consumer);
         let label = root.get_label(bit_len);
         let (common, rem_label, rem_prefix) = SliceData::common_prefix(&label, &prefix);
         *tree.data_mut() = if !label.is_empty() && (common.is_none() || (rem_label.is_some() && rem_prefix.is_some())) {
@@ -784,7 +783,7 @@ fn hashmap_into_subtree_without_prefix<T: HashmapType>(tree: &mut T, prefix: Sli
     let bit_len = tree.bit_len();
     debug_assert!(bit_len >= prefix.remaining_bits());
     if !prefix.is_empty() && !tree.is_empty() && bit_len >= prefix.remaining_bits() {
-        let mut root = SliceData::from_cell(tree.data().unwrap(), gas_consumer);
+        let mut root = SliceData::from_cell_ref(tree.data().unwrap(), gas_consumer);
         let label = root.get_label(bit_len);
         let (common, rem_label, rem_prefix) = SliceData::common_prefix(&label, &prefix);
         *tree.data_mut() = if !label.is_empty() && (common.is_none() || (rem_label.is_some() && rem_prefix.is_some())) {

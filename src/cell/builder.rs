@@ -13,8 +13,7 @@
 */
 
 use GasConsumer;
-use {CellData, CellType, SliceData, find_tag, append_tag, LevelMask};
-use std::sync::Arc;
+use {DataCell, Cell, CellType, SliceData, find_tag, append_tag, LevelMask};
 use std::fmt;
 use std::convert::From;
 use types::{ExceptionCode, Result};
@@ -25,32 +24,32 @@ const EXACT_CAPACITY: usize = 128;
 pub struct BuilderData {
     data: Vec<u8>,
     length_in_bits: usize,
-    references: Vec<Arc<CellData>>,
+    references: Vec<Cell>,
     cell_type: CellType,
     level_mask: LevelMask,
 }
 
-impl From<BuilderData> for Arc<CellData> {
+impl From<BuilderData> for Cell {
     fn from(builder: BuilderData) -> Self {
-        Arc::new(builder.into_cell())
+        builder.into_cell()
     }
 }
 
 impl From<BuilderData> for SliceData {
     fn from(builder: BuilderData) -> Self {
-        Arc::new(builder.into_cell()).into()
+        builder.into_cell().into()
     }
 }
 
-impl From<&BuilderData> for Arc<CellData> {
+impl From<&BuilderData> for Cell {
     fn from(builder: &BuilderData) -> Self {
-        Arc::new(builder.clone().into_cell())
+        builder.clone().into_cell()
     }
 }
 
 impl From<&BuilderData> for SliceData {
     fn from(builder: &BuilderData) -> Self {
-        Arc::new(builder.clone().into_cell()).into()
+        builder.clone().into_cell().into()
     }
 }
 
@@ -61,12 +60,12 @@ impl Default for BuilderData {
 }
 
 impl BuilderData {
-    pub fn finalize(&self, gas_consumer: &mut dyn GasConsumer) -> Arc<CellData> {
+    pub fn finalize(self, gas_consumer: &mut dyn GasConsumer) -> Cell {
         gas_consumer.finalize_cell();
         self.into()
     }
 
-    pub fn finalize_and_load(&self, gas_consumer: &mut dyn GasConsumer) -> SliceData {
+    pub fn finalize_and_load(self, gas_consumer: &mut dyn GasConsumer) -> SliceData {
         gas_consumer.finalize_cell();
         gas_consumer.load_cell();
         self.into()
@@ -107,12 +106,12 @@ impl BuilderData {
 
     pub fn with_raw_and_refs<TRefs>(data: Vec<u8>, length_in_bits: usize, refs: TRefs) -> Result<BuilderData>
     where
-        TRefs: IntoIterator<Item = Arc<CellData>>
+        TRefs: IntoIterator<Item = Cell>
     {
         let mut builder = BuilderData::with_raw(data, length_in_bits)?;
         let mut iter = refs.into_iter();
         while let Some(value) = iter.next() {
-            builder.checked_append_reference(&value)?;
+            builder.checked_append_reference(value)?;
         }
         Ok(builder)
     }
@@ -130,15 +129,15 @@ impl BuilderData {
         }
     }
 
-    pub fn from(cell: &Arc<CellData>) -> BuilderData {
+    pub fn from(cell: &Cell) -> BuilderData {
         let mut builder = BuilderData::with_bitstring(cell.data().to_vec()).unwrap();
-        builder.references = cell.references().to_vec();
+        builder.references = cell.clone_references();
         builder.cell_type = cell.cell_type();
         builder.level_mask = cell.level_mask();
         builder
     }
 
-    fn into_cell(mut self) -> CellData {
+    fn into_cell(mut self) -> Cell {
         if self.cell_type == CellType::Ordinary {
             // For Ordinary cells - level is set automatically,
             // for other types - it must be set manually by set_level_mask()
@@ -147,17 +146,20 @@ impl BuilderData {
             }
         }
         append_tag(&mut self.data, self.length_in_bits);
-        CellData::with_params(
-            self.references,
-            self.data,
-            self.cell_type,
-            self.level_mask.mask(),
-            None,
-            None,
-        ).unwrap()
+
+        Cell::with_cell_impl(
+            DataCell::with_params(
+                self.references,
+                self.data,
+                self.cell_type,
+                self.level_mask.mask(),
+                None,
+                None,
+            ).unwrap()
+        )
     }
 
-    pub fn references(&self) -> &[Arc<CellData>] {
+    pub fn references(&self) -> &[Cell] {
         self.references.as_slice()
     }
 
@@ -180,7 +182,7 @@ impl BuilderData {
 
     pub fn update_cell<T, P, R>(&mut self, mutate: T, args: P) -> R
     where
-        T: Fn(&mut Vec<u8>, &mut usize, &mut Vec<Arc<CellData>>, P)  -> R
+        T: Fn(&mut Vec<u8>, &mut usize, &mut Vec<Cell>, P)  -> R
     {
         let result = mutate(&mut self.data, &mut self.length_in_bits, &mut self.references, args);
 
@@ -190,13 +192,13 @@ impl BuilderData {
     }
 
     /// returns data of cell
-    pub fn cell_data(&mut self, data: &mut Vec<u8>, bits: &mut usize, children: &mut Vec<Arc<CellData>>) {
+    pub fn cell_data(&mut self, data: &mut Vec<u8>, bits: &mut usize, children: &mut Vec<Cell>) {
         *data = self.data.clone();
         *bits = self.length_in_bits;
         children.clear();
         let n = self.references.len();
         for i in 0..n {
-            children.push(Arc::clone(&self.references[i]))
+            children.push(self.references[i].clone())
         }
     }
 
@@ -302,15 +304,15 @@ impl BuilderData {
     }
 
     pub fn append_reference(&mut self, child: BuilderData) {
-        self.references.push(Arc::<CellData>::from(child));
+        self.references.push(Cell::from(child));
     }
 
-    pub fn append_reference_cell(&mut self, child: Arc::<CellData>) {
+    pub fn append_reference_cell(&mut self, child: Cell) {
         self.references.push(child);
     }
 
     pub fn prepend_reference(&mut self, child: BuilderData) {
-        self.references.insert(0, Arc::<CellData>::from(child));
+        self.references.insert(0, Cell::from(child));
     }
 
     pub fn set_type(&mut self, cell_type: CellType) {
@@ -328,7 +330,7 @@ impl BuilderData {
 
 impl fmt::Display for BuilderData {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let cell: Arc<CellData> = self.into();
+        let cell: Cell = self.into();
         write!(f, "{}", cell)
     }
 }

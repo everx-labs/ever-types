@@ -13,10 +13,9 @@
 */
 
 
-use std::sync::Arc;
 use std::io::{Write, Read};
 use std::fmt;
-use {CellData, CellType, LevelMask};
+use {Cell, DataCell, CellType, LevelMask};
 use types::UInt256;
 use std::collections::{HashMap, HashSet};
 use crc::{crc32, Hasher32};
@@ -44,7 +43,7 @@ pub enum BocSerialiseMode {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct BagOfCells {
-    cells: HashMap<UInt256, Arc<CellData>>,
+    cells: HashMap<UInt256, Cell>,
     sorted: Vec<UInt256>,
     absent: HashSet<UInt256>,
     roots_count: usize,
@@ -52,16 +51,16 @@ pub struct BagOfCells {
 }
 
 impl BagOfCells {
-    pub fn with_root(root_cell: &Arc<CellData>) -> Self {
+    pub fn with_root(root_cell: &Cell) -> Self {
         Self::with_roots_and_absent(vec!(root_cell), Vec::new())
     }
     
-    pub fn with_roots(root_cells: Vec<&Arc<CellData>>) -> Self {
+    pub fn with_roots(root_cells: Vec<&Cell>) -> Self {
         Self::with_roots_and_absent(root_cells, Vec::new())
     }
     
-    pub fn with_roots_and_absent(root_cells: Vec<&Arc<CellData>>, absent_cells: Vec<&Arc<CellData>>) -> Self {
-        let mut	cells = HashMap::<UInt256, Arc<CellData>>::new();
+    pub fn with_roots_and_absent(root_cells: Vec<&Cell>, absent_cells: Vec<&Cell>) -> Self {
+        let mut	cells = HashMap::<UInt256, Cell>::new();
         let mut sorted = Vec::<UInt256>::new();
         let mut absent_cells_hashes = HashSet::<UInt256>::new();
         let mut roots = Vec::<UInt256>::new();
@@ -88,11 +87,11 @@ impl BagOfCells {
         }
     }
 
-    pub fn cells(&self) -> &HashMap<UInt256, Arc<CellData>> {
+    pub fn cells(&self) -> &HashMap<UInt256, Cell> {
         &self.cells
     }
 
-    pub fn withdraw_cells(self) -> HashMap<UInt256, Arc<CellData>> {
+    pub fn withdraw_cells(self) -> HashMap<UInt256, Cell> {
         self.cells
     }
 
@@ -108,10 +107,10 @@ impl BagOfCells {
         self.sorted.len()
     }
 
-    pub fn get_cell_by_index(&self, index: usize) -> Option<Arc<CellData>> {
+    pub fn get_cell_by_index(&self, index: usize) -> Option<Cell> {
         if let Some(hash) = self.sorted.get(index) {
             if let Some(cell) = self.cells.get(hash) {
-                return Some(Arc::clone(cell));
+                return Some(cell.clone());
             } else {
                 panic!("Bag of cells is corrupted!");
             }
@@ -246,7 +245,8 @@ impl BagOfCells {
                 } else {
                     Self::serialize_ordinary_cell_data(cell, dest)?;
                     
-                    for child in cell.references() {
+                    for i in 0..cell.references_count() {
+                        let child = cell.reference(i).unwrap();
                         let child_index = hashes_to_indexes[&child.repr_hash()] as u64;
                         assert!(child_index > cell_index);
                         dest.write(&(child_index).to_be_bytes()[(8-ref_size)..8])?;
@@ -266,41 +266,42 @@ impl BagOfCells {
         Ok(())
     }
 
-    fn traverse(cell: &Arc<CellData>, cells: &mut HashMap<UInt256, Arc<CellData>>, sorted: &mut Vec<UInt256>, 
+    fn traverse(cell: &Cell, cells: &mut HashMap<UInt256, Cell>, sorted: &mut Vec<UInt256>, 
         absent_cells: &HashSet<UInt256>) {
 
         let hash = cell.repr_hash();
 
         if !cells.contains_key(&hash) {
             if !absent_cells.contains(&hash) {
-                for child in cell.references().iter() {
-                    Self::traverse(child, cells, sorted, absent_cells);
+                for i in 0..cell.references_count() {
+                    let child = cell.reference(i).unwrap();
+                    Self::traverse(&child, cells, sorted, absent_cells);
                 }
             }
-            cells.insert(hash.clone(), Arc::clone(cell));
+            cells.insert(hash.clone(), cell.clone());
             sorted.push(hash);
         }
     }
 
-    fn serialize_absent_cell(cell: &Arc<CellData>, write: &mut dyn Write) -> std::io::Result<()> {
+    fn serialize_absent_cell(cell: &Cell, write: &mut dyn Write) -> std::io::Result<()> {
         
         // For absent cells (i.e., external references), only d1 is present, always equal to 23 + 32l.
         let l = cell.level();
         assert!(l == 0);
-        assert_eq!(cell.calc_bit_length(), SHA256_SIZE * 8);
+        assert_eq!(cell.bit_length(), SHA256_SIZE * 8);
         write.write(&[23 + 32 * l])?;
         write.write(&cell.data()[..SHA256_SIZE])?;
         Ok(())
     }
 
     /// Serialize ordinary cell data
-    pub fn serialize_ordinary_cell_data(cell: &Arc<CellData>, write: &mut dyn Write) -> std::io::Result<()> {
-        let data_bit_len = cell.calc_bit_length();
+    pub fn serialize_ordinary_cell_data(cell: &Cell, write: &mut dyn Write) -> std::io::Result<()> {
+        let data_bit_len = cell.bit_length();
 
         // descriptor bytes
         let (d1, d2) = Self::calculate_descriptor_bytes(
             data_bit_len,
-            cell.references_used() as u8,
+            cell.references_count() as u8,
             cell.level_mask().mask(),
             cell.cell_type() != CellType::Ordinary,
             cell.store_hashes());
@@ -334,16 +335,16 @@ impl BagOfCells {
     }
 
     /// Serialized cell size including descriptor bytes and competition tag
-    pub fn cell_serialized_size(&self, cell: &Arc<CellData>, ref_size: usize) -> usize {
+    pub fn cell_serialized_size(&self, cell: &Cell, ref_size: usize) -> usize {
         if self.absent.contains(&cell.repr_hash()) {
             1 +
             (1 + cell.level() as usize + 1) * SHA256_SIZE
         } else {
-            let bits = cell.calc_bit_length();
+            let bits = cell.bit_length();
             2 +
             if cell.store_hashes() { (cell.level() as usize + 1) * (SHA256_SIZE + DEPTH_SIZE) } else { 0 } +
             (bits / 8) + if bits % 8 != 0 { 1 } else { 0 } +
-            cell.references_used() * ref_size
+            cell.references_count() * ref_size
         }
     }
 }
@@ -373,7 +374,7 @@ fn fail(error: String) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::InvalidInput, error)
 }
 
-pub fn deserialize_tree_of_cells<T: Read>(src: &mut T) -> std::io::Result<Arc<CellData>> {
+pub fn deserialize_tree_of_cells<T: Read>(src: &mut T) -> std::io::Result<Cell> {
     let mut cells = deserialize_cells_tree_ex(src).map(|(v, _, _, _)| v)?;
     match cells.len() {
         0 => Err(fail(format!("Error parsing cells tree: empty root"))),
@@ -382,17 +383,22 @@ pub fn deserialize_tree_of_cells<T: Read>(src: &mut T) -> std::io::Result<Arc<Ce
     }
 }
 
-pub fn serialize_tree_of_cells<T: Write>(cell: &Arc<CellData>, dst: &mut T) -> std::io::Result<()> {
+pub fn serialize_tree_of_cells<T: Write>(cell: &Cell, dst: &mut T) -> std::io::Result<()> {
     BagOfCells::with_root(cell).write_to(dst, false)
+}
+
+pub fn serialize_toc(cell: &Cell) -> std::io::Result<Vec<u8>> {
+    let mut dst = vec![];
+    BagOfCells::with_root(cell).write_to(&mut dst, false).map(|_| dst)
 }
 
 // Absent cells is deserialized into cell with hash. Caller have to know about the cells and process it by itself.
 // Returns vector with root cells
-pub fn deserialize_cells_tree<T>(src: &mut T) -> std::io::Result<Vec<Arc<CellData>>> where T: Read {
+pub fn deserialize_cells_tree<T>(src: &mut T) -> std::io::Result<Vec<Cell>> where T: Read {
     deserialize_cells_tree_ex(src).map(|(v, _, _, _)| v)
 }
 
-pub fn deserialize_cells_tree_ex<T>(src: &mut T) -> std::io::Result<(Vec<Arc<CellData>>, BocSerialiseMode, usize, usize)>
+pub fn deserialize_cells_tree_ex<T>(src: &mut T) -> std::io::Result<(Vec<Cell>, BocSerialiseMode, usize, usize)>
     where T: Read {
         
     let mut src = IoCrcFilter::new(src);
@@ -498,22 +504,22 @@ pub fn deserialize_cells_tree_ex<T>(src: &mut T) -> std::io::Result<(Vec<Arc<Cel
     }
 
     // Resolving references & constructing cells from leaves to roots
-    let mut done_cells = HashMap::<u32, Arc<CellData>>::new();
+    let mut done_cells = HashMap::<u32, Cell>::new();
     for cell_index in (0..cells_count).rev() {
         let raw_cell = raw_cells.remove(&cell_index).unwrap();
         let mut refs = vec!();
         for ref_cell_index in raw_cell.refs {
             if let Some(child) = done_cells.get(&ref_cell_index) {
-                refs.push(Arc::clone(child))
+                refs.push(child.clone())
             } else {
                 return Err(fail(format!("unresolved reference")))
             }
         }
-        let mut cell = CellData::with_params(refs, raw_cell.data, raw_cell.cell_type, raw_cell.level, 
+        let mut cell = DataCell::with_params(refs, raw_cell.data, raw_cell.cell_type, raw_cell.level, 
             raw_cell.hashes, raw_cell.depths).map_err(|err| fail(err.to_string()))?;
         cell.finalize_ex(true).map_err(|err| fail(err.to_string()))?;
 
-        done_cells.insert(cell_index as u32, Arc::new(cell));
+        done_cells.insert(cell_index as u32, Cell::with_cell_impl(cell));
     }
 
     let mut roots = Vec::with_capacity(roots_count);

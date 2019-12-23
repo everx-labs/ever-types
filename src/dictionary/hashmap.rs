@@ -15,7 +15,6 @@
 use super::{HashmapRemover, HashmapType, KeyLeaf, Leaf, hm_label};
 use super::{BuilderData, SliceData};
 use std::fmt;
-use std::sync::Arc;
 use types::{ExceptionCode};
 use super::*;
 
@@ -26,7 +25,7 @@ use super::*;
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct HashmapE {
     bit_len: usize,
-    data: Option<Arc<CellData>>,
+    data: Option<Cell>,
 }
 
 #[cfg_attr(rustfmt, rustfmt_skip)]
@@ -49,10 +48,10 @@ impl HashmapE {
         Self::with_hashmap(bit_len, data.reference(0).ok())
     }
     /// construct with bit_len and root representing Hashmap
-    pub fn with_hashmap(bit_len: usize, data: Option<&Arc<CellData>>) -> Self {
+    pub fn with_hashmap(bit_len: usize, data: Option<Cell>) -> Self {
         Self {
             bit_len,
-            data: data.cloned()
+            data: data
         }
     }
     /// serialize not empty root in current cell
@@ -118,21 +117,21 @@ impl HashmapE {
         self.hashmap_set_with_mode::<Self>(key, value, gas_consumer, ADD)
     }
     /// sets value as reference
-    pub fn setref(&mut self, key: SliceData, value: &Arc<CellData>) -> Leaf {
+    pub fn setref(&mut self, key: SliceData, value: &Cell) -> Leaf {
         self.hashmap_setref_with_mode::<Self>(key, value, &mut 0, ADD | REPLACE)
     }
-    pub fn setref_with_gas(&mut self, key: SliceData, value: &Arc<CellData>, gas_consumer: &mut dyn GasConsumer) -> Leaf {
+    pub fn setref_with_gas(&mut self, key: SliceData, value: &Cell, gas_consumer: &mut dyn GasConsumer) -> Leaf {
         self.hashmap_setref_with_mode::<Self>(key, value, gas_consumer, ADD | REPLACE)
     }
-    pub fn replaceref_with_gas(&mut self, key: SliceData, value: &Arc<CellData>, gas_consumer: &mut dyn GasConsumer) -> Leaf {
+    pub fn replaceref_with_gas(&mut self, key: SliceData, value: &Cell, gas_consumer: &mut dyn GasConsumer) -> Leaf {
         self.hashmap_setref_with_mode::<Self>(key, value, gas_consumer, REPLACE)
     }
-    pub fn addref_with_gas(&mut self, key: SliceData, value: &Arc<CellData>, gas_consumer: &mut dyn GasConsumer) -> Leaf {
+    pub fn addref_with_gas(&mut self, key: SliceData, value: &Cell, gas_consumer: &mut dyn GasConsumer) -> Leaf {
         self.hashmap_setref_with_mode::<Self>(key, value, gas_consumer, ADD)
     }
     /// gets next/this or previous leaf
     pub fn find_leaf(&self, key: SliceData, next: bool, eq: bool, signed_int: bool, gas_consumer: &mut dyn GasConsumer) -> KeyLeaf {
-        find_leaf::<Self>(self.data.as_ref(), self.bit_len, key, next, eq, signed_int, gas_consumer)
+        find_leaf::<Self>(self.data().cloned(), self.bit_len, key, next, eq, signed_int, gas_consumer)
     }
     /// removes item
     pub fn remove(&mut self, key: SliceData) -> Leaf {
@@ -143,11 +142,11 @@ impl HashmapE {
     }
     /// gets item with minimal key
     pub fn get_min(&self, signed: bool, gas_consumer: &mut dyn GasConsumer) -> KeyLeaf {
-        get_min::<Self>(self.data.as_ref(), self.bit_len, self.bit_len, signed, gas_consumer)
+        get_min::<Self>(self.data.as_ref().cloned(), self.bit_len, self.bit_len, signed, gas_consumer)
     }
     /// gets item with maximal key
     pub fn get_max(&self, signed: bool, gas_consumer: &mut dyn GasConsumer) -> KeyLeaf {
-        get_max::<Self>(self.data.as_ref(), self.bit_len, self.bit_len, signed, gas_consumer)
+        get_max::<Self>(self.data.as_ref().cloned(), self.bit_len, self.bit_len, signed, gas_consumer)
     }
     /// transform to subtree with the common prefix
     pub fn into_subtree_with_prefix(&mut self, prefix: SliceData, gas_consumer: &mut dyn GasConsumer) {
@@ -187,10 +186,10 @@ impl HashmapType for HashmapE {
     fn is_leaf(_slice: &mut SliceData) -> bool {
         true
     }
-    fn data(&self) -> Option<&Arc<CellData>> {
+    fn data(&self) -> Option<&Cell> {
         self.data.as_ref()
     }
-    fn data_mut(&mut self) -> &mut Option<Arc<CellData>> {
+    fn data_mut(&mut self) -> &mut Option<Cell> {
         &mut self.data
     }
     fn bit_len(&self) -> usize {

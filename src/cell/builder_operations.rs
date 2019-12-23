@@ -12,9 +12,8 @@
 * limitations under the License.
 */
 
-use {CellData, MAX_REFERENCES_COUNT, MAX_DATA_BITS, BuilderData, SliceData, find_tag};
+use {Cell, MAX_REFERENCES_COUNT, MAX_DATA_BITS, BuilderData, SliceData, find_tag};
 use types::{ExceptionCode, Result};
-use std::sync::Arc;
 
 impl BuilderData {
     /// maximum number of references
@@ -47,11 +46,11 @@ impl BuilderData {
     }
 
     // TODO: check here cyclic appending
-    pub fn checked_append_reference(&mut self, cell: &Arc<CellData>) -> Result<&mut Self> {
+    pub fn checked_append_reference(&mut self, cell: Cell) -> Result<&mut Self> {
         if self.references().len() >= MAX_REFERENCES_COUNT {
             Err(ExceptionCode::CellOverflow)
         } else {
-            self.append_reference(BuilderData::from(cell));
+            self.append_reference_cell(cell);
             Ok(self)
         }  
     }
@@ -66,7 +65,7 @@ impl BuilderData {
         }
         self.append_raw(other.get_bytestring(0).as_slice(), other.remaining_bits())?;
         for i in 0..other.remaining_references() {
-            self.append_reference(BuilderData::from(other.reference(i)?));
+            self.append_reference_cell(other.reference(i)?);
         }
         Ok(self)
     }

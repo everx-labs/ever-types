@@ -12,20 +12,19 @@
 * limitations under the License.
 */
 
-use {BuilderData, CellData, CellType, GasConsumer, find_tag, parse_slice_base, LevelMask};
+use {BuilderData, Cell, CellType, GasConsumer, parse_slice_base, LevelMask};
 use std::hash::{Hash, Hasher};
 use std::convert::From;
 use std::fmt;
 use std::mem;
 use std::cmp;
 use std::ops::{Bound, Range, RangeBounds};
-use std::sync::Arc;
 use num::{BigInt, bigint::{Sign}};
 use types::{ExceptionCode, Result, UInt256};
 
 #[derive(Eq, Clone)]
 pub struct SliceData {
-    pub(super) cell: Arc<CellData>,
+    pub(super) cell: Cell,
     data_window: Range<usize>,
     references_window: Range<usize>,
 }
@@ -34,7 +33,7 @@ impl Hash for SliceData {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.get_bytestring(0).hash(state);
         for i in self.references_window.clone() {
-            self.cell.references[i].hash(state);
+            state.write(self.cell.reference(i).unwrap().repr_hash().as_slice());
         }
     }
 }
@@ -59,7 +58,7 @@ impl PartialEq for SliceData {
         for i in 0..refs_count {
             let ref1 = self.reference(i).unwrap();
             let ref2 = slice.reference(i).unwrap();
-            if *ref1 != *ref2 {
+            if ref1 != ref2 {
                 return false;
             } 
         }
@@ -87,21 +86,21 @@ impl From<&[u8]> for SliceData {
     }
 }
 
-impl From<&Arc<CellData>> for SliceData {
-    fn from(cell: &Arc<CellData>) -> SliceData {
+impl From<&Cell> for SliceData {
+    fn from(cell: &Cell) -> SliceData {
         SliceData {
             cell: cell.clone(),
-            references_window: 0..cell.references.len(),
-            data_window: 0..find_tag(&cell.data),
+            references_window: 0..cell.references_count(),
+            data_window: 0..cell.bit_length(),
         }
     }
 }
 
-impl From<Arc<CellData>> for SliceData {
-    fn from(cell: Arc<CellData>) -> SliceData {
+impl From<Cell> for SliceData {
+    fn from(cell: Cell) -> SliceData {
         SliceData {
-            references_window: 0..cell.references.len(),
-            data_window: 0..find_tag(&cell.data),
+            references_window: 0..cell.references_count(),
+            data_window: 0..cell.bit_length(),
             cell
         }
     }
@@ -112,7 +111,12 @@ impl SliceData {
         BuilderData::new().into()
     }
 
-    pub fn from_cell(cell: &Arc<CellData>, gas_consumer: &mut dyn GasConsumer) -> SliceData {
+    pub fn from_cell(cell: Cell, gas_consumer: &mut dyn GasConsumer) -> SliceData {
+        gas_consumer.load_cell();
+        cell.into()
+    }
+
+    pub fn from_cell_ref(cell: &Cell, gas_consumer: &mut dyn GasConsumer) -> SliceData {
         gas_consumer.load_cell();
         cell.into()
     }
@@ -168,7 +172,7 @@ impl SliceData {
     }
 
     /// shrinks references_window: range - subrange of current window, returns shrinked references
-    pub fn shrink_references<T: RangeBounds<usize>>(&mut self, range: T) -> Vec<Arc<CellData>> {
+    pub fn shrink_references<T: RangeBounds<usize>>(&mut self, range: T) -> Vec<Cell> {
         let refs_count = self.remaining_references();
         let start = match range.start_bound() {
             Bound::Included(start) => *start,
@@ -200,16 +204,16 @@ impl SliceData {
         let trailing = self.data_window.start % 8;
         if trailing == 0 {
             BuilderData::with_raw(
-                self.cell.data[start..=end].to_vec(),
+                self.cell.data()[start..=end].to_vec(),
                 self.remaining_bits()
             ).unwrap()
         } else if trailing + self.remaining_bits() <= 8 {
-            let vec = vec![self.cell.data[start] << trailing];
+            let vec = vec![self.cell.data()[start] << trailing];
             BuilderData::with_raw(vec, self.remaining_bits()).unwrap()
         } else {
-            let vec = vec![self.cell.data[start] << trailing];
+            let vec = vec![self.cell.data()[start] << trailing];
             let mut builder = BuilderData::with_raw(vec, 8 - trailing).unwrap();
-            builder.append_raw(& self.cell.data[start + 1..=end], trailing + self.remaining_bits() - 8).unwrap();
+            builder.append_raw(& self.cell.data()[start + 1..=end], trailing + self.remaining_bits() - 8).unwrap();
             builder
         }
     }
@@ -232,36 +236,36 @@ impl SliceData {
         }
     }
 
-    pub fn reference(&self, i: usize) -> Result<&Arc<CellData>> {
+    pub fn reference(&self, i: usize) -> Result<Cell> {
         if self.references_window.start + i < self.references_window.end {
-            Ok(&self.cell.references[self.references_window.start + i])
+            self.cell.reference(self.references_window.start + i)
         } else {
             Err(ExceptionCode::CellUnderflow)
         }
     }
 
-    pub fn storage(&self) -> &Vec<u8> {
-        &self.cell.data
+    pub fn storage(&self) -> &[u8] {
+        self.cell.data()
     }
     /// returns internal cell regardless window settings
-    pub fn cell(&self) -> &Arc<CellData> {
+    pub fn cell(&self) -> &Cell {
         &self.cell
     }
     /// constructs new cell trunking original regarding window settings
-    pub fn into_cell(&self) -> Arc<CellData> {
+    pub fn into_cell(&self) -> Cell {
         BuilderData::from_slice(self).into()
     }
 
-    pub fn checked_drain_reference(&mut self) -> Result<&Arc<CellData>> {
+    pub fn checked_drain_reference(&mut self) -> Result<Cell> {
         if self.remaining_references() != 0 {
             Ok(self.drain_reference())
         } else {
             Err(ExceptionCode::CellUnderflow)
         }
     }
-    fn drain_reference(&mut self) -> &Arc<CellData> {
+    fn drain_reference(&mut self) -> Cell {
         self.references_window.start += 1;
-        &self.cell.references[self.references_window.start - 1]
+        self.cell.reference(self.references_window.start - 1).unwrap()
     }
 
     pub fn get_references(&self) -> Range<usize> {
@@ -296,16 +300,16 @@ impl SliceData {
         let q = index / 8;
         let r = index % 8;
         if r == 0 {
-            Ok(self.cell.data[q] >> (8 - r - bits))
+            Ok(self.cell.data()[q] >> (8 - r - bits))
         } else if bits <= (8 - r) {
-            Ok(self.cell.data[q] >> (8 - r - bits) & ((1 << bits) - 1))
+            Ok(self.cell.data()[q] >> (8 - r - bits) & ((1 << bits) - 1))
         } else {
             let mut ret = 0u16;
-            if q < self.cell.data.len() {
-                ret |= (self.cell.data[q] as u16) << 8;
+            if q < self.cell.data().len() {
+                ret |= (self.cell.data()[q] as u16) << 8;
             }
-            if q < self.cell.data.len() - 1 {
-                ret |= self.cell.data[q + 1] as u16;
+            if q < self.cell.data().len() - 1 {
+                ret |= self.cell.data()[q + 1] as u16;
             }
             Ok(((ret >> (8 - r)) as u8 >> (8 - bits)) as u8)
         }
@@ -569,7 +573,7 @@ impl SliceData {
     }
 
     pub fn cell_type(&self) -> CellType {
-        self.cell.cell_type
+        self.cell.cell_type()
     }
     pub fn level(&self) -> u8 {
         self.cell.level()
@@ -580,7 +584,7 @@ impl SliceData {
 
     /// Returns cell's higher hash for given index (last one - representation hash)
     pub fn hash(&self, index: usize) -> UInt256 {
-        CellData::hash(&self.cell, index)
+        Cell::hash(&self.cell, index)
     }
 
     /// Returns cell's depth for given index
@@ -604,8 +608,8 @@ impl SliceData {
 
     pub fn is_full_cell_slice(&self) -> bool {
         self.data_window.start == 0 && 
-        self.data_window.end == find_tag(&self.cell.data()) &&
-        self.remaining_references() == self.cell().references().len()
+        self.data_window.end == self.cell.bit_length() &&
+        self.remaining_references() == self.cell.references_count()
     }
 }
 
@@ -623,7 +627,7 @@ impl SliceData {
     pub fn append_reference(&mut self, other: SliceData) -> &mut SliceData {
         let mut builder = BuilderData::from_slice(self);
         builder.append_reference(BuilderData::from_slice(&other));
-        let slice = SliceData::from(Arc::<CellData>::from(builder));
+        let slice = SliceData::from(Cell::from(builder));
         mem::replace(self, slice);
         self
     }
@@ -654,6 +658,6 @@ impl fmt::Display for SliceData {
 
 impl fmt::LowerHex for SliceData {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:x}", Arc::as_ref(&self.into_cell()))
+        write!(f, "{:x}", self.into_cell())
     }
 }
