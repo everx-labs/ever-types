@@ -75,7 +75,7 @@ pipeline {
                         
                         G_commit = GIT_COMMIT
                         if (params.dockerImage_ton_labs_types == '') {
-                            G_image_target = "ton-labs-types:${GIT_COMMIT}"
+                            G_image_target = "tonlabs/ton-labs-types:${GIT_COMMIT}"
                         } else {
                             G_image_target = params.dockerImage_ton_labs_types
                         }
