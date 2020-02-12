@@ -12,11 +12,12 @@
 * limitations under the License.
 */
 
-use GasConsumer;
-use {DataCell, Cell, CellType, SliceData, find_tag, append_tag, LevelMask};
-use std::fmt;
 use std::convert::From;
-use types::{ExceptionCode, Result};
+use std::fmt;
+
+use crate::{append_tag, Cell, CellType, DataCell, find_tag, LevelMask, SliceData};
+use crate::GasConsumer;
+use crate::types::{ExceptionCode, Result};
 
 const EXACT_CAPACITY: usize = 128;
 

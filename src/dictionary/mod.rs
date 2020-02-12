@@ -12,16 +12,18 @@
 * limitations under the License.
 */
 
-use GasConsumer;
-use {BuilderData, Cell, IBitstring, SliceData};
 use std::cmp;
-use types::{ExceptionCode, Result};
-use Mask;
+
+use crate::{BuilderData, Cell, IBitstring, SliceData};
+use crate::GasConsumer;
+use crate::Mask;
+use crate::types::{ExceptionCode, Result};
+
+pub use self::hashmap::HashmapE;
+pub use self::pfxhashmap::PfxHashmapE;
 
 mod hashmap;
-pub use self::hashmap::HashmapE;
 mod pfxhashmap;
-pub use self::pfxhashmap::PfxHashmapE;
 
 pub type KeyLeaf = Result<(Option<BuilderData>, Option<SliceData>)>;
 pub type Leaf = Result<Option<SliceData>>;

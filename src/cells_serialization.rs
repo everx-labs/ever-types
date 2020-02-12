@@ -13,13 +13,15 @@
 */
 
 
-use std::io::{Write, Read};
-use std::fmt;
-use {Cell, DataCell, CellType, LevelMask};
-use types::UInt256;
 use std::collections::{HashMap, HashSet};
+use std::fmt;
+use std::io::{Read, Write};
+
 use crc::{crc32, Hasher32};
-use types::ByteOrderRead;
+
+use crate::{Cell, CellType, DataCell, LevelMask};
+use crate::types::ByteOrderRead;
+use crate::types::UInt256;
 
 
 pub const SHA256_SIZE: usize = 32;
@@ -515,9 +517,8 @@ pub fn deserialize_cells_tree_ex<T>(src: &mut T) -> std::io::Result<(Vec<Cell>, 
                 return Err(fail(format!("unresolved reference")))
             }
         }
-        let mut cell = DataCell::with_params(refs, raw_cell.data, raw_cell.cell_type, raw_cell.level, 
+        let cell = DataCell::with_params(refs, raw_cell.data, raw_cell.cell_type, raw_cell.level, 
             raw_cell.hashes, raw_cell.depths).map_err(|err| fail(err.to_string()))?;
-        cell.finalize_ex(true).map_err(|err| fail(err.to_string()))?;
 
         done_cells.insert(cell_index as u32, Cell::with_cell_impl(cell));
     }
