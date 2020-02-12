@@ -12,11 +12,13 @@
 * limitations under the License.
 */
 
-use GasConsumer;
-use super::{HashmapType, HashmapRemover, Leaf, hm_label, ADD, REPLACE};
-use super::{BuilderData, Cell, IBitstring, SliceData};
 use std::fmt;
-use types::{Result};
+
+use crate::GasConsumer;
+use crate::types::Result;
+
+use super::{ADD, HashmapRemover, HashmapType, hm_label, Leaf, REPLACE};
+use super::{BuilderData, Cell, IBitstring, SliceData};
 
 #[derive(Clone, Debug)]
 pub struct PfxHashmapE {

@@ -18,8 +18,9 @@ use std::result;
 use std::str;
 use std::cmp;
 use std::error::Error;
+use num::FromPrimitive;
 
-#[derive(Clone, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Default, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct UInt256([u8; 32]);
 
 impl fmt::Debug for UInt256 {
@@ -68,22 +69,23 @@ impl str::FromStr for AccountId {
 // Exceptions *****************************************************************
 
 #[cfg_attr(rustfmt, rustfmt_skip)]
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
 pub enum ExceptionCode {
-    NormalTermination      = 0,
-    AlternativeTermination = 1,
-    StackUnderflow  = 2,
-    StackOverflow   = 3,
-    IntegerOverflow = 4,
-    RangeCheckError = 5,
-    InvalidOpcode   = 6,
-    TypeCheckError  = 7,
-    CellOverflow    = 8,
-    CellUnderflow   = 9,
-    DictionaryError = 10,
-    UnknownError    = 11,
-    FatalError      = 12,
-    OutOfGas        = 13,
+    NormalTermination       = 0,
+    AlternativeTermination  = 1,
+    StackUnderflow          = 2,
+    StackOverflow           = 3,
+    IntegerOverflow         = 4,
+    RangeCheckError         = 5,
+    InvalidOpcode           = 6,
+    TypeCheckError          = 7,
+    CellOverflow            = 8,
+    CellUnderflow           = 9,
+    DictionaryError         = 10,
+    UnknownError            = 11,
+    FatalError              = 12,
+    OutOfGas                = 13,
+    ReferenceNotLoaded      = 14,
 }
 
 impl fmt::Display for ExceptionCode {
@@ -110,40 +112,26 @@ impl Error for ExceptionCode {
 impl ExceptionCode {
     pub fn message(&self) -> &'static str {
         match self {
-            ExceptionCode::NormalTermination      => "normal termination",
-            ExceptionCode::AlternativeTermination => "alternative termination",
-            ExceptionCode::StackUnderflow  => "stack underflow",
-            ExceptionCode::StackOverflow   => "stack overflow",
-            ExceptionCode::IntegerOverflow => "integer overflow",
-            ExceptionCode::RangeCheckError => "range check error",
-            ExceptionCode::InvalidOpcode   => "invalid opcode",
-            ExceptionCode::TypeCheckError  => "type check error",
-            ExceptionCode::CellOverflow    => "cell overflow",
-            ExceptionCode::CellUnderflow   => "cell underflow",
-            ExceptionCode::DictionaryError => "dictionary error",
-            ExceptionCode::UnknownError    => "unknown error",
-            ExceptionCode::FatalError      => "fatal error",
-            ExceptionCode::OutOfGas        => "out of gas error",
+            ExceptionCode::NormalTermination        => "normal termination",
+            ExceptionCode::AlternativeTermination   => "alternative termination",
+            ExceptionCode::StackUnderflow           => "stack underflow",
+            ExceptionCode::StackOverflow            => "stack overflow",
+            ExceptionCode::IntegerOverflow          => "integer overflow",
+            ExceptionCode::RangeCheckError          => "range check error",
+            ExceptionCode::InvalidOpcode            => "invalid opcode",
+            ExceptionCode::TypeCheckError           => "type check error",
+            ExceptionCode::CellOverflow             => "cell overflow",
+            ExceptionCode::CellUnderflow            => "cell underflow",
+            ExceptionCode::DictionaryError          => "dictionary error",
+            ExceptionCode::UnknownError             => "unknown error",
+            ExceptionCode::FatalError               => "fatal error",
+            ExceptionCode::OutOfGas                 => "out of gas error",
+            ExceptionCode::ReferenceNotLoaded       => "reference is not loaded",
         }
     }
+
     pub fn from_usize(number: usize) -> Option<ExceptionCode> {
-        match number {
-            0  => Some(ExceptionCode::NormalTermination),
-            1  => Some(ExceptionCode::AlternativeTermination),
-            2  => Some(ExceptionCode::StackUnderflow),
-            3  => Some(ExceptionCode::StackOverflow),
-            4  => Some(ExceptionCode::IntegerOverflow),
-            5  => Some(ExceptionCode::RangeCheckError),
-            6  => Some(ExceptionCode::InvalidOpcode),
-            7  => Some(ExceptionCode::TypeCheckError),
-            8  => Some(ExceptionCode::CellOverflow),
-            9  => Some(ExceptionCode::CellUnderflow),
-            10 => Some(ExceptionCode::DictionaryError),
-            11 => Some(ExceptionCode::UnknownError),
-            12 => Some(ExceptionCode::FatalError),
-            13 => Some(ExceptionCode::OutOfGas),
-            _  => None,
-        }
+        FromPrimitive::from_usize(number)
     }
 }
 
