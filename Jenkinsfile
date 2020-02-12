@@ -1,7 +1,6 @@
 G_giturl = ""
 G_gitcred = 'TonJenSSH'
 G_docker_creds = "TonJenDockerHub"
-G_image_base = "rust:1.40"
 G_image_target = ""
 G_docker_image = null
 G_build = "none"
@@ -76,7 +75,7 @@ pipeline {
                         
                         G_commit = GIT_COMMIT
                         if (params.dockerImage_ton_labs_types == '') {
-                            G_image_target = "${C_PROJECT}:${GIT_COMMIT}"
+                            G_image_target = "ton-labs-types:${GIT_COMMIT}"
                         } else {
                             G_image_target = params.dockerImage_ton_labs_types
                         }
@@ -99,6 +98,7 @@ pipeline {
                             args
                         )
                         echo "Image ${G_docker_image} as ${G_image_target}"
+                        G_docker_image.push()
                     }
                 }
             }
@@ -108,7 +108,7 @@ pipeline {
                 script {
                     docker.withRegistry('', G_docker_creds) {
                         G_docker_image.withRun() {c -> 
-                            docker.image(G_image_base).inside("--volumes-from ${c.id}") {
+                            docker.image("rust:latest").inside("--volumes-from ${c.id}") {
                                 sh """
                                     cd /tonlabs/ton-labs-types
                                     cargo update
@@ -129,7 +129,7 @@ pipeline {
                 script {
                     docker.withRegistry('', G_docker_creds) {
                         G_docker_image.withRun() {c -> 
-                            docker.image(G_image_base).inside("--volumes-from ${c.id}") {
+                            docker.image("rust:latest").inside("--volumes-from ${c.id}") {
                                 sh """
                                     cd /tonlabs/ton-labs-types
                                     cargo update
