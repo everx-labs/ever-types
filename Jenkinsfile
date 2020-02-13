@@ -158,7 +158,7 @@ pipeline {
                                 ],
                                 [
                                     $class: 'StringParameterValue',
-                                    name: 'dockerImage_ton_block',
+                                    name: 'dockerImage_ton_labs_block',
                                     value: "tonlabs/ton-labs-block:ton-labs-types-${GIT_COMMIT}"
                                 ],
                                 [
@@ -197,7 +197,7 @@ pipeline {
                                 ],
                                 [
                                     $class: 'StringParameterValue',
-                                    name: 'dockerImage_ton_vm',
+                                    name: 'dockerImage_ton_labs_vm',
                                     value: "tonlabs/ton-labs-vm:ton-labs-types-${GIT_COMMIT}"
                                 ],
                                 [
@@ -240,12 +240,12 @@ pipeline {
                                 ],
                                 [
                                     $class: 'StringParameterValue',
-                                    name: 'dockerImage_ton_block',
+                                    name: 'dockerImage_ton_labs_block',
                                     value: "tonlabs/ton-labs-block:ton-labs-types-${GIT_COMMIT}"
                                 ],
                                 [
                                     $class: 'StringParameterValue',
-                                    name: 'dockerImage_ton_vm',
+                                    name: 'dockerImage_ton_labs_vm',
                                     value: "tonlabs/ton-labs-vm:ton-labs-types-${GIT_COMMIT}"
                                 ],
                                 [
@@ -294,12 +294,12 @@ pipeline {
                                 ],
                                 [
                                     $class: 'StringParameterValue',
-                                    name: 'dockerImage_ton_block',
+                                    name: 'dockerImage_ton_labs_block',
                                     value: "tonlabs/ton-labs-block:ton-labs-types-${GIT_COMMIT}"
                                 ],
                                 [
                                     $class: 'StringParameterValue',
-                                    name: 'dockerImage_ton_vm',
+                                    name: 'dockerImage_ton_labs_vm',
                                     value: "tonlabs/ton-labs-vm:ton-labs-types-${GIT_COMMIT}"
                                 ],
                                 [
