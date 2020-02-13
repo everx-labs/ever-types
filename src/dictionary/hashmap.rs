@@ -12,10 +12,12 @@
 * limitations under the License.
 */
 
-use super::{HashmapRemover, HashmapType, KeyLeaf, Leaf, hm_label};
-use super::{BuilderData, SliceData};
 use std::fmt;
-use types::{ExceptionCode};
+
+use crate::types::ExceptionCode;
+
+use super::{HashmapRemover, HashmapType, hm_label, KeyLeaf, Leaf};
+use super::{BuilderData, SliceData};
 use super::*;
 
 ///////////////////////////////////////////////

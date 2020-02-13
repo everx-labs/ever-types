@@ -18,6 +18,8 @@ extern crate crc;
 extern crate log;
 extern crate num;
 extern crate sha2;
+#[macro_use]
+extern crate num_derive;
 
 #[macro_use]
 pub mod types;

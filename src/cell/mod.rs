@@ -16,8 +16,8 @@ use std::sync::{Arc, Mutex};
 use std::collections::HashSet;
 use std::fmt;
 use std::ops::{BitOr, BitOrAssign};
-use types::{ExceptionCode, Result, UInt256};
-use cells_serialization::{SHA256_SIZE, BagOfCells};
+use crate::types::{ExceptionCode, Result, UInt256};
+use crate::cells_serialization::{SHA256_SIZE, BagOfCells};
 use sha2::{Sha256, Digest};
 use std::cmp::{max, min};
 use std::ops::Deref;
@@ -499,14 +499,62 @@ pub fn append_tag(data: &mut Vec<u8>, bits: usize) {
 }
 
 #[derive(Clone)]
-pub struct DataCell {
-    references: Vec<Cell>,
-    data: Vec<u8>,
+pub struct CellData {
     cell_type: CellType,
-    level_mask: LevelMask,
-    store_hashes: bool,
+    data: Vec<u8>,
+    bit_length: usize,
     hashes: Option<Vec<UInt256>>,
     depths: Option<Vec<u16>>,
+}
+
+impl CellData {
+    pub fn with_params(cell_type: CellType, data: Vec<u8>, hashes: Option<Vec<UInt256>>, depths: Option<Vec<u16>>) -> Self {
+        let bit_length = find_tag(&data);
+        assert!(bit_length < 1024);
+        Self {
+            cell_type,
+            data,
+            bit_length,
+            hashes,
+            depths,
+        }
+    }
+
+    pub fn cell_type(&self) -> CellType {
+        self.cell_type
+    }
+
+    pub fn data(&self) -> &Vec<u8> {
+        &self.data
+    }
+
+    pub fn bit_length(&self) -> usize {
+        self.bit_length
+    }
+
+    pub fn hashes(&self) -> &Option<Vec<UInt256>> {
+        &self.hashes
+    }
+
+    fn set_hashes(&mut self, hashes: Option<Vec<UInt256>>) {
+        self.hashes = hashes
+    }
+
+    pub fn depths(&self) -> &Option<Vec<u16>> {
+        &self.depths
+    }
+
+    fn set_depths(&mut self, depths: Option<Vec<u16>>) {
+        self.depths = depths
+    }
+}
+
+#[derive(Clone)]
+pub struct DataCell {
+    cell_data: CellData,
+    references: Vec<Cell>,
+    level_mask: LevelMask,
+    store_hashes: bool,
 }
 
 impl DataCell {
@@ -525,29 +573,28 @@ impl DataCell {
         let refs = refs.into_iter();
         let mut references: Vec<Cell> = vec![];
         references.extend(refs);
+        let store_hashes = hashes.is_some();
         let mut cell = DataCell {
-            data,
+            cell_data: CellData::with_params(cell_type, data, hashes, depths),
             references,
-            cell_type,
             level_mask: LevelMask::with_mask(level_mask),
-            store_hashes: hashes.is_some(),
-            hashes,
-            depths };
-        cell.finalize_ex(false)?;
+            store_hashes,
+        };
+        cell.finalize(true)?;
         Ok(cell)
     }
 
-    pub fn finalize_ex(&mut self, force: bool) -> Result<()> {
+    fn finalize(&mut self, force: bool) -> Result<()> {
 
-        if !force && self.hashes.is_some() && self.depths.is_some() {
+        if !force && self.hashes().is_some() && self.depths().is_some() {
             return Ok(());
         }
 
         // Check data size and references count
 
-        let bit_len = find_tag(&self.data);
+        let bit_len = self.bit_length();
 
-        match self.cell_type {
+        match self.cell_type() {
             CellType::PrunedBranch => {
                 // type + level_mask + level * (hashes + depths)
                 if bit_len != 8 * (1 + 1 + (self.level() as usize) * (SHA256_SIZE + 2)) ||
@@ -555,8 +602,8 @@ impl DataCell {
                 {
                     return Err(ExceptionCode::RangeCheckError)
                 }
-                if self.data[0] != u8::from(CellType::PrunedBranch) ||
-                   self.data[1] != self.level_mask.mask() {
+                if self.data()[0] != u8::from(CellType::PrunedBranch) ||
+                   self.data()[1] != self.level_mask.mask() {
                     return Err(ExceptionCode::FatalError)
                 }
             },
@@ -593,7 +640,7 @@ impl DataCell {
         for child in self.references.iter() {
             children_mask |= child.level_mask();
         }
-        let level_mask = match self.cell_type {
+        let level_mask = match self.cell_type() {
             CellType::Ordinary => children_mask,
             CellType::PrunedBranch => self.level_mask(),
             CellType::LibraryReference => LevelMask::with_mask(0), // TODO ???
@@ -635,7 +682,7 @@ impl DataCell {
 
             if i == 0 {
                 let data_size = (bit_len / 8) + if bit_len % 8 != 0 { 1 } else { 0 };
-                hasher.input(&self.data[..data_size]);
+                hasher.input(&self.data()[..data_size]);
             } else {
                 hasher.input(hashes.last().unwrap());
             }
@@ -657,27 +704,47 @@ impl DataCell {
         }
 
         if self.store_hashes {
-            if &depths != self.depths.as_ref().expect("cell have to store depths") {
+            if &depths != self.depths().as_ref().expect("cell have to store depths") {
                 return Err(ExceptionCode::FatalError)
             }
-           if &hashes != self.hashes.as_ref().expect("cell have to store hashes") {
+           if &hashes != self.hashes().as_ref().expect("cell have to store hashes") {
                return Err(ExceptionCode::FatalError)
            }
         } else {
-            self.hashes = Some(hashes);
-            self.depths = Some(depths);
+            self.set_hashes(Some(hashes));
+            self.set_depths(Some(depths));
         }
         Ok(())
+    }
+
+    pub fn cell_data(&self) -> &CellData {
+        &self.cell_data
+    }
+
+    fn hashes(&self) -> &Option<Vec<UInt256>> {
+        &self.cell_data.hashes()
+    }
+
+    fn set_hashes(&mut self, hashes: Option<Vec<UInt256>>) {
+        self.cell_data.set_hashes(hashes)
+    }
+
+    fn depths(&self) -> &Option<Vec<u16>> {
+        &self.cell_data.depths()
+    }
+
+    fn set_depths(&mut self, depths: Option<Vec<u16>>) {
+        self.cell_data.set_depths(depths)
     }
 }
 
 impl CellImpl for DataCell {
     fn data(&self) -> &[u8] {
-        &self.data
+        &self.cell_data.data()
     }
 
     fn bit_length(&self) -> usize {
-        find_tag(&self.data)
+        self.cell_data.bit_length()
     }
 
     fn references_count(&self) -> usize {
@@ -689,7 +756,7 @@ impl CellImpl for DataCell {
     }
 
     fn cell_type(&self) -> CellType {
-        self.cell_type
+        self.cell_data.cell_type()
     }
 
     fn level_mask(&self) -> LevelMask {
@@ -698,18 +765,18 @@ impl CellImpl for DataCell {
 
     fn hash(&self, mut index: usize) -> UInt256 {
         index = self.level_mask.calc_hash_index(index);
-        if self.cell_type == CellType::PrunedBranch {
+        if self.cell_type() == CellType::PrunedBranch {
             // pruned cell stores all hashes (except representetion) in data
             if index != self.level() as usize {
                 let offset = 1 + 1 + index * SHA256_SIZE;
-                self.data[offset..offset + SHA256_SIZE].into()
-            } else if let Some(hashes) = self.hashes.as_ref() {
+                self.data()[offset..offset + SHA256_SIZE].into()
+            } else if let Some(hashes) = self.hashes().as_ref() {
                 hashes.get(0).map(|h| h.clone()).expect("cell is not finalized")
             } else {
                 panic!("cell is not finalized")
             }
         }
-        else if let Some(hashes) = self.hashes.as_ref() {
+        else if let Some(hashes) = self.hashes().as_ref() {
             hashes.get(index as usize).map(|h| h.clone()).expect("cell is not finalized")
         } else {
             panic!("cell is not finalized")
@@ -718,21 +785,21 @@ impl CellImpl for DataCell {
 
     fn depth(&self, mut index: usize) -> u16 {
         index = self.level_mask.calc_hash_index(index);
-        if self.cell_type == CellType::PrunedBranch {
+        if self.cell_type() == CellType::PrunedBranch {
             // pruned cell stores all depth except "representetion" in data
             if index != self.level() as usize {
                 let offset = 1 + 1 + (self.level() as usize) * SHA256_SIZE + index * 2;
-                if offset + 2 <= self.data.len() {
+                if offset + 2 <= self.data().len() {
                     let mut depth = [0; 2];
-                    depth.copy_from_slice(&self.data[offset..offset + 2]);
+                    depth.copy_from_slice(&self.data()[offset..offset + 2]);
                     return u16::from_be_bytes(depth)
                 }
-            } else if let Some(ref depths) = self.depths {
+            } else if let Some(ref depths) = self.depths() {
                 if let Some(d) = depths.get(0) {
                     return *d
                 }
             }
-        } else if let Some(ref depths) = self.depths {
+        } else if let Some(ref depths) = self.depths() {
             if let Some(d) = depths.get(index as usize) {
                 return *d
             }

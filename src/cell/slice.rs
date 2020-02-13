@@ -12,15 +12,18 @@
 * limitations under the License.
 */
 
-use {BuilderData, Cell, CellType, GasConsumer, parse_slice_base, LevelMask};
-use std::hash::{Hash, Hasher};
+use std::cmp;
 use std::convert::From;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::mem;
-use std::cmp;
 use std::ops::{Bound, Range, RangeBounds};
-use num::{BigInt, bigint::{Sign}};
-use types::{ExceptionCode, Result, UInt256};
+
+use num::{BigInt, bigint::Sign};
+
+use crate::{BuilderData, Cell, CellType, GasConsumer, LevelMask, parse_slice_base};
+use crate:: types::{ExceptionCode, Result, UInt256};
+
 
 #[derive(Eq, Clone)]
 pub struct SliceData {
