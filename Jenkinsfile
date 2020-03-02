@@ -122,7 +122,7 @@ pipeline {
             steps {
                 script {
                     docker.withRegistry('', G_docker_creds) {
-                        args = "--no-cache --label 'git-commit=${GIT_COMMIT}' --force-rm --target ton-labs-types-src ."
+                        args = "--pull --no-cache --label 'git-commit=${GIT_COMMIT}' --force-rm --target ton-labs-types-src ."
                         G_docker_image = docker.build(
                             G_image_target, 
                             args
@@ -137,7 +137,7 @@ pipeline {
             agent {
                 dockerfile {
                     registryCredentialsId "${G_docker_creds}"
-                    additionalBuildArgs "--target ton-labs-types-rust " + 
+                    additionalBuildArgs "--pull --target ton-labs-types-rust " + 
                                         "--build-arg \"TON_LABS_TYPES_IMAGE=${G_image_target}\""
                 }
             }
@@ -159,7 +159,7 @@ pipeline {
             agent {
                 dockerfile {
                     registryCredentialsId "${G_docker_creds}"
-                    additionalBuildArgs "--target ton-labs-types-rust " + 
+                    additionalBuildArgs "--pull --target ton-labs-types-rust " + 
                                         "--build-arg \"TON_LABS_TYPES_IMAGE=${G_image_target}\""
                 }
             }
