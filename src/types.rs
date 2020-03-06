@@ -19,24 +19,32 @@ use std::str;
 use std::cmp;
 use std::error::Error;
 use num::FromPrimitive;
+use std::fmt::{LowerHex, UpperHex};
+
 
 #[derive(Clone, Default, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct UInt256([u8; 32]);
 
 impl fmt::Debug for UInt256 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        LowerHex::fmt(self, f)
+    }
+}
+
+impl LowerHex for UInt256 {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if f.alternate() {
+            write!(f, "0x")?;
+        }
         write!(f, "{}", hex::encode(&self.0))
     }
 }
 
-impl fmt::LowerHex for UInt256 {
+impl UpperHex for UInt256 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", hex::encode(&self.0))
-    }
-}
-
-impl fmt::UpperHex for UInt256 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if f.alternate() {
+            write!(f, "0x")?;
+        }
         write!(f, "{}", hex::encode_upper(&self.0))
     }
 }
@@ -232,8 +240,10 @@ impl std::convert::AsRef<[u8]> for &UInt256 {
 pub trait ByteOrderRead {
     fn read_be_uint(&mut self, bytes: usize) -> std::io::Result<usize>;
     fn read_byte(&mut self) -> std::io::Result<u8>;
+    fn read_be_u16(&mut self) -> std::io::Result<u16>;
     fn read_be_u32(&mut self) -> std::io::Result<u32>;
     fn read_be_u64(&mut self) -> std::io::Result<u64>;
+    fn read_le_u16(&mut self) -> std::io::Result<u16>;
     fn read_le_u32(&mut self) -> std::io::Result<u32>;
     fn read_le_u64(&mut self) -> std::io::Result<u64>;
     fn read_u256(&mut self) -> std::io::Result<[u8; 32]>;
@@ -265,25 +275,41 @@ impl<T: std::io::Read> ByteOrderRead for T {
             _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "too many bytes to read in usize")),
         }
     }
+
     fn read_byte(&mut self) -> std::io::Result<u8> {
         self.read_be_uint(1).map(|value| value as u8)
     }
+
+    fn read_be_u16(&mut self) -> std::io::Result<u16> {
+        self.read_be_uint(2).map(|value| value as u16)
+    }
+
     fn read_be_u32(&mut self) -> std::io::Result<u32> {
         self.read_be_uint(4).map(|value| value as u32)
     }
+
     fn read_be_u64(&mut self) -> std::io::Result<u64> {
         self.read_be_uint(8).map(|value| value as u64)
     }
+
+    fn read_le_u16(&mut self) -> std::io::Result<u16> {
+        let mut buf = [0; 2];
+        self.read_exact(&mut buf)?;
+        Ok(u16::from_le_bytes(buf))
+    }
+
     fn read_le_u32(&mut self) -> std::io::Result<u32> {
         let mut buf = [0; 4];
         self.read_exact(&mut buf)?;
         Ok(u32::from_le_bytes(buf))
     }
+
     fn read_le_u64(&mut self) -> std::io::Result<u64> {
         let mut buf = [0; 8];
         self.read_exact(&mut buf)?;
         Ok(u64::from_le_bytes(buf))
     }
+
     fn read_u256(&mut self) -> std::io::Result<[u8; 32]> {
         let mut buf = [0; 32];
         self.read_exact(&mut buf)?;
