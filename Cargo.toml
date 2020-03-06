@@ -17,7 +17,7 @@
 [package]
 build = "build.rs"
 name = "ton_types"
-version = "1.0.0"
+version = "0.21.78"
 edition = "2018"
 
 [dependencies]
@@ -28,6 +28,7 @@ hex = "^0.4.0"
 log = "0.4.8"
 num = "^0.2"
 sha2 = "^0.8"
-num-traits = "0.2.11"
-num-derive = "0.3.0"
+num-traits = "^0.2"
+num-derive = "^0.3"
+
 
