@@ -28,49 +28,49 @@ def buildImagesMap() {
     }
 
     if (params.image_ton_block == '') {
-        G_images.put('ton-block', "tonlabs/ton-block::ton-labs-types-${GIT_COMMIT}")
+        G_images.put('ton-block', "tonlabs/ton-block:ton-labs-types-${GIT_COMMIT}")
     } else {
         G_images.put('ton-block', params.image_ton_block)
     }
 
     if (params.image_ton_labs_block == '') {
-        G_images.put('ton-labs-block', "tonlabs/ton-labs-block::ton-labs-types-${GIT_COMMIT}")
+        G_images.put('ton-labs-block', "tonlabs/ton-labs-block:ton-labs-types-${GIT_COMMIT}")
     } else {
         G_images.put('ton-labs-block', params.image_ton_labs_block)
     }
 
     if (params.image_ton_vm == '') {
-        G_images.put('ton-vm', "tonlabs/ton-vm::ton-labs-types-${GIT_COMMIT}")
+        G_images.put('ton-vm', "tonlabs/ton-vm:ton-labs-types-${GIT_COMMIT}")
     } else {
         G_images.put('ton-vm', params.image_ton_vm)
     }
 
     if (params.image_ton_labs_vm == '') {
-        G_images.put('ton-labs-vm', "tonlabs/ton-labs-vm::ton-labs-types-${GIT_COMMIT}")
+        G_images.put('ton-labs-vm', "tonlabs/ton-labs-vm:ton-labs-types-${GIT_COMMIT}")
     } else {
         G_images.put('ton-labs-vm', params.image_ton_labs_vm)
     }
 
     if (params.image_ton_labs_abi == '') {
-        G_images.put('ton-labs-abi', "tonlabs/ton-labs-abi::ton-labs-types-${GIT_COMMIT}")
+        G_images.put('ton-labs-abi', "tonlabs/ton-labs-abi:ton-labs-types-${GIT_COMMIT}")
     } else {
         G_images.put('ton-labs-abi', params.image_ton_labs_abi)
     }
 
     if (params.image_ton_executor == '') {
-        G_images.put('ton-executor', "tonlabs/ton-executor::ton-labs-types-${GIT_COMMIT}")
+        G_images.put('ton-executor', "tonlabs/ton-executor:ton-labs-types-${GIT_COMMIT}")
     } else {
         G_images.put('ton-executor', params.image_ton_executor)
     }
 
     if (params.image_ton_sdk == '') {
-        G_images.put('ton-sdk', "tonlabs/ton-sdk::ton-labs-types-${GIT_COMMIT}")
+        G_images.put('ton-sdk', "tonlabs/ton-sdk:ton-labs-types-${GIT_COMMIT}")
     } else {
         G_images.put('ton-sdk', params.image_ton_sdk)
     }
 
     if (params.image_tvm_linker == '') {
-        G_images.put('tvm-linker', "tonlabs/tvm_linker::ton-labs-types-${GIT_COMMIT}")
+        G_images.put('tvm-linker', "tonlabs/tvm_linker:ton-labs-types-${GIT_COMMIT}")
     } else {
         G_images.put('tvm-linker', params.image_tvm_linker)
     }
