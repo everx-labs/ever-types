@@ -16,7 +16,6 @@ use std::convert::From;
 use std::fmt;
 
 use crate::{append_tag, Cell, CellType, DataCell, find_tag, LevelMask, SliceData};
-use crate::GasConsumer;
 use crate::types::{ExceptionCode, Result};
 
 const EXACT_CAPACITY: usize = 128;
@@ -61,17 +60,6 @@ impl Default for BuilderData {
 }
 
 impl BuilderData {
-    pub fn finalize(self, gas_consumer: &mut dyn GasConsumer) -> Cell {
-        gas_consumer.finalize_cell();
-        self.into()
-    }
-
-    pub fn finalize_and_load(self, gas_consumer: &mut dyn GasConsumer) -> SliceData {
-        gas_consumer.finalize_cell();
-        gas_consumer.load_cell();
-        self.into()
-    }
-
     pub fn new() -> BuilderData {
         BuilderData {
             data: Vec::with_capacity(EXACT_CAPACITY),
@@ -81,13 +69,13 @@ impl BuilderData {
             level_mask: LevelMask::with_mask(0),
         }
     }
+
     pub fn with_raw(mut data: Vec<u8>, length_in_bits: usize) -> Result<BuilderData> {
         if length_in_bits > data.len() * 8 {
-            return Err(ExceptionCode::FatalError);
+            failure::bail!(ExceptionCode::FatalError)
         } else if length_in_bits > BuilderData::bits_capacity() {
-            return Err(ExceptionCode::CellOverflow);
+            failure::bail!(ExceptionCode::CellOverflow)
         }
-
         let data_shift = length_in_bits % 8;
         if data_shift == 0 {
             data.truncate(length_in_bits / 8);
@@ -122,9 +110,9 @@ impl BuilderData {
         if length_in_bits == 0 {
             Ok(BuilderData::new())
         } else if length_in_bits > data.len() * 8 {
-            Err(ExceptionCode::FatalError)
+            failure::bail!(ExceptionCode::FatalError)
         } else if length_in_bits > BuilderData::bits_capacity() {
-            Err(ExceptionCode::CellOverflow)
+            failure::bail!(ExceptionCode::CellOverflow)
         } else {
             BuilderData::with_raw(data, length_in_bits)
         }
@@ -223,9 +211,9 @@ impl BuilderData {
 
     pub fn append_raw(&mut self, slice: &[u8], bits: usize) -> Result<&mut Self> {
         if slice.len() * 8 < bits {
-            return Err(ExceptionCode::FatalError);
+            failure::bail!(ExceptionCode::FatalError)
         } else if (self.length_in_bits() + bits) > BuilderData::bits_capacity() {
-            return Err(ExceptionCode::CellOverflow);
+            failure::bail!(ExceptionCode::CellOverflow)
         } else if bits != 0 {
             if (self.length_in_bits() % 8) == 0 {
                 if (bits % 8) == 0 {
@@ -237,7 +225,6 @@ impl BuilderData {
                 self.append_with_double_shifting(slice, bits);
             }
         }
-
         assert!(self.length_in_bits() <= BuilderData::bits_capacity());
         assert!(self.data().len() * 8 <= BuilderData::bits_capacity() + 1);
         Ok(self)
@@ -252,6 +239,7 @@ impl BuilderData {
         self.length_in_bits += bits;
         self.data.truncate(self.length_in_bits / 8);
     }
+
     fn append_with_slice_shifting(&mut self, slice: &[u8], bits: usize) {
         assert!(bits % 8 != 0);
         assert_eq!(self.length_in_bits() % 8, 0);
@@ -267,6 +255,7 @@ impl BuilderData {
         last_byte <<= 8 - slice_shift;
         self.data.push(last_byte);
     }
+
     fn append_with_double_shifting(&mut self, slice: &[u8], bits: usize) {
         let self_shift = self.length_in_bits % 8;
         self.data.truncate(1 + self.length_in_bits / 8);
