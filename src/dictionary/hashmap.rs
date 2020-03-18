@@ -63,7 +63,7 @@ impl HashmapE {
                 cell.checked_append_references_and_data(&SliceData::from(root))?;
                 Ok(())
             }
-            None => Err(ExceptionCode::CellUnderflow)
+            None => failure::bail!(ExceptionCode::CellUnderflow)
         }
     }
     /// serialize hashmapE to cell
@@ -82,7 +82,7 @@ impl HashmapE {
     /// deserialize not empty root
     pub fn read_hashmap_root(&mut self, slice: &mut SliceData) -> Result<()> {
         let mut root = slice.clone();
-        let label = slice.get_label(self.bit_len);
+        let label = slice.get_label(self.bit_len)?;
         if label.remaining_bits() != self.bit_len {
             slice.shrink_references(2..);
             root.shrink_by_remainder(slice);
@@ -151,12 +151,12 @@ impl HashmapE {
         get_max::<Self>(self.data.as_ref().cloned(), self.bit_len, self.bit_len, signed, gas_consumer)
     }
     /// transform to subtree with the common prefix
-    pub fn into_subtree_with_prefix(&mut self, prefix: SliceData, gas_consumer: &mut dyn GasConsumer) {
-        hashmap_into_subtree_with_prefix::<Self>(self, prefix, gas_consumer);
+    pub fn into_subtree_with_prefix(&mut self, prefix: SliceData, gas_consumer: &mut dyn GasConsumer) -> Result<()> {
+        hashmap_into_subtree_with_prefix::<Self>(self, prefix, gas_consumer)
     }
     /// transform to subtree without the common prefix
-    pub fn into_subtree_without_prefix(&mut self, prefix: SliceData, gas_consumer: &mut dyn GasConsumer) {
-        hashmap_into_subtree_without_prefix::<Self>(self, prefix, gas_consumer);
+    pub fn into_subtree_without_prefix(&mut self, prefix: SliceData, gas_consumer: &mut dyn GasConsumer) -> Result<()> {
+        hashmap_into_subtree_without_prefix::<Self>(self, prefix, gas_consumer)
     }
 }
 

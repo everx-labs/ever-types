@@ -14,10 +14,8 @@
 
 use super::SliceData;
 use std::fmt;
-use std::result;
 use std::str;
 use std::cmp;
-use std::error::Error;
 use num::FromPrimitive;
 use std::fmt::{LowerHex, UpperHex};
 
@@ -66,9 +64,8 @@ impl From<UInt256> for AccountId {
 }
 
 impl str::FromStr for AccountId {
-    type Err = ParseAccountIdError;
-
-    fn from_str(value: &str) -> result::Result<Self, Self::Err> {
+    type Err = failure::Error;
+    fn from_str(value: &str) -> Result<Self> {
         let uint = UInt256::from_str(value)?;
         Ok(AccountId::from(uint.0))
     }
@@ -77,7 +74,7 @@ impl str::FromStr for AccountId {
 // Exceptions *****************************************************************
 
 #[cfg_attr(rustfmt, rustfmt_skip)]
-#[derive(Clone, Copy, Debug, PartialEq, FromPrimitive)]
+#[derive(Clone, Copy, Debug, FromPrimitive, PartialEq)]
 pub enum ExceptionCode {
     NormalTermination       = 0,
     AlternativeTermination  = 1,
@@ -92,27 +89,12 @@ pub enum ExceptionCode {
     DictionaryError         = 10,
     UnknownError            = 11,
     FatalError              = 12,
-    OutOfGas                = 13,
-    ReferenceNotLoaded      = 14,
+    OutOfGas                = 13
 }
 
 impl fmt::Display for ExceptionCode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.message())
-    }
-}
-
-impl Error for ExceptionCode {
-    fn description(&self) -> &str {
-        self.message()
-    }
-
-    fn cause(&self) -> Option<&dyn Error> {
-        None
-    }
-
-    fn source(&self) -> Option<&(dyn Error + 'static)> {
-        None
     }
 }
 
@@ -133,8 +115,7 @@ impl ExceptionCode {
             ExceptionCode::DictionaryError          => "dictionary error",
             ExceptionCode::UnknownError             => "unknown error",
             ExceptionCode::FatalError               => "fatal error",
-            ExceptionCode::OutOfGas                 => "out of gas error",
-            ExceptionCode::ReferenceNotLoaded       => "reference is not loaded",
+            ExceptionCode::OutOfGas                 => "out of gas error"
         }
     }
 
@@ -144,7 +125,7 @@ impl ExceptionCode {
 }
 
 pub type Bitmask = u8;
-pub(crate) type Result<T> = result::Result<T, ExceptionCode>;
+pub type Result<T> = std::result::Result<T, failure::Error>;
 
 impl From<[u8;32]> for UInt256 {
     fn from(data: [u8;32]) -> Self {
@@ -205,17 +186,16 @@ impl fmt::Display for ParseAccountIdError {
 }
 
 impl str::FromStr for UInt256 {
-    type Err = ParseAccountIdError;
-
-    fn from_str(value: &str) -> result::Result<Self, Self::Err> {
+    type Err = failure::Error;
+    fn from_str(value: &str) -> Result<Self> {
         if value.len() != 64 {
-            Err(ParseAccountIdError::SizeError)
+            failure::bail!(ParseAccountIdError::SizeError)
         } else {
             let mut data: [u8;32] = [0;32];
             for i in 0..data.len() {
                 let hex = &value[2*i..2+2*i];
                 data[i] = u8::from_str_radix(hex, 16)
-                    .map_err(|_| ParseAccountIdError::HexError)?;
+                    .map_err(|_| failure::err_msg(ParseAccountIdError::HexError))?;
             }
             Ok(UInt256::from(data))
         }
