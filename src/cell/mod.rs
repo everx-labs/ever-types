@@ -745,11 +745,11 @@ impl DataCell {
                 if bit_len != 8 * (1 + 1 + (self.level() as usize) * (SHA256_SIZE + 2)) ||
                     self.references.len() > 0
                 {
-                    return Err(ExceptionCode::RangeCheckError)
+                    failure::bail!(ExceptionCode::RangeCheckError)
                 }
                 if self.data()[0] != u8::from(CellType::PrunedBranch) ||
                    self.data()[1] != self.level_mask().mask() {
-                    return Err(ExceptionCode::FatalError)
+                    failure::bail!(ExceptionCode::FatalError)
                 }
             },
             CellType::MerkleProof => {
@@ -757,7 +757,7 @@ impl DataCell {
                 if bit_len != 8 * (1 + SHA256_SIZE + 2) ||
                     self.references.len() != 1
                 {
-                    return Err(ExceptionCode::RangeCheckError)
+                    failure::bail!(ExceptionCode::RangeCheckError)
                 }
                 // TODO check hashes and depths
             },
@@ -766,17 +766,17 @@ impl DataCell {
                 if bit_len != 8 * (1 + 2 * (SHA256_SIZE + 2)) ||
                     self.references.len() != 2
                 {
-                    return Err(ExceptionCode::RangeCheckError)
+                    failure::bail!(ExceptionCode::RangeCheckError)
                 }
                 // TODO check hashes and depths
             },
             CellType::Ordinary => {
                 if bit_len > MAX_DATA_BITS || self.references.len() > MAX_REFERENCES_COUNT {
-                    return Err(ExceptionCode::CellOverflow)
+                    failure::bail!(ExceptionCode::CellOverflow)
                 }
             },
             CellType::LibraryReference => { },
-            CellType::Unknown => return Err(ExceptionCode::RangeCheckError)
+            CellType::Unknown => failure::bail!(ExceptionCode::RangeCheckError)
         }
 
         // Check level
@@ -791,10 +791,10 @@ impl DataCell {
             CellType::LibraryReference => LevelMask::with_mask(0), // TODO ???
             CellType::MerkleProof => LevelMask::for_merkle_cell(children_mask),
             CellType::MerkleUpdate => LevelMask::for_merkle_cell(children_mask),
-            CellType::Unknown => return Err(ExceptionCode::RangeCheckError)
+            CellType::Unknown => failure::bail!(ExceptionCode::RangeCheckError)
         };
         if self.level_mask() != level_mask {
-            return Err(ExceptionCode::RangeCheckError)
+            failure::bail!(ExceptionCode::RangeCheckError)
         }
 
         // calculate hashes and depths
@@ -850,11 +850,11 @@ impl DataCell {
 
         if self.store_hashes() {
             if &depths != self.depths().as_ref().expect("cell have to store depths") {
-                return Err(ExceptionCode::FatalError)
+                failure::bail!(ExceptionCode::FatalError)
             }
-           if &hashes != self.hashes().as_ref().expect("cell have to store hashes") {
-               return Err(ExceptionCode::FatalError)
-           }
+            if &hashes != self.hashes().as_ref().expect("cell have to store hashes") {
+                failure::bail!(ExceptionCode::FatalError)
+            }
         } else {
             self.set_hashes(Some(hashes));
             self.set_depths(Some(depths));
@@ -901,7 +901,7 @@ impl CellImpl for DataCell {
     }
 
     fn reference(&self, index: usize) -> Result<Cell> {
-        self.references.get(index).cloned().ok_or(ExceptionCode::CellUnderflow)
+        self.references.get(index).cloned().ok_or(failure::err_msg(ExceptionCode::CellUnderflow))
     }
 
     fn cell_type(&self) -> CellType {

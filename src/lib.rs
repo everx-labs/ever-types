@@ -23,6 +23,7 @@ extern crate num_derive;
 
 #[macro_use]
 pub mod types;
+pub use self::types::Result;
 #[macro_use]
 pub mod cell;
 pub use self::cell::*;
@@ -55,18 +56,21 @@ impl Mask for u8 {
 
 
 pub trait GasConsumer {
-    fn consume_gas(&mut self, gas: u64);
-    fn finalize_cell(&mut self) {
-        self.consume_gas(0)
-    }
-    fn load_cell(&mut self) {
-        self.consume_gas(0)
-    }
+    fn finalize_cell(&mut self, builder: BuilderData) -> Cell;
+    fn load_cell(&mut self, cell: Cell) -> SliceData;
+    fn finalize_cell_and_load(&mut self, builder: BuilderData) -> SliceData;
 }
 
 impl GasConsumer for u64 {
-    fn consume_gas(&mut self, gas: u64) {
-        *self = self.checked_sub(gas).unwrap_or(0)
+    fn finalize_cell(&mut self, builder: BuilderData) -> Cell {
+        builder.into()
+    }
+    fn load_cell(&mut self, cell: Cell) -> SliceData {
+        cell.into()
+    }
+    fn finalize_cell_and_load(&mut self, builder: BuilderData) -> SliceData {
+        let cell = self.finalize_cell(builder);
+        self.load_cell(cell)
     }
 }
 

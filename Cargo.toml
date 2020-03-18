@@ -17,13 +17,14 @@
 [package]
 build = "build.rs"
 name = "ton_types"
-version = "0.21.78"
+version = "0.21.15"
 edition = "2018"
 
 [dependencies]
 
 # External
 crc = "^1.8.1"
+failure ="0.1.6"
 hex = "^0.4.0"
 log = "0.4.8"
 num = "^0.2"
