@@ -436,15 +436,6 @@ pipeline {
                                 failure { script { G_test = "failure" } }
                             }
                         }
-                        stage('Tag as latest') {
-                            steps {
-                                script {
-                                    docker.withRegistry('', G_docker_creds) {
-                                        G_docker_image.push('latest')
-                                    }
-                                }
-                            }
-                        }
                     }
                 }
             }
