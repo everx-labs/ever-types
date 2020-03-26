@@ -15,10 +15,10 @@
 #
 
 [package]
+edition = "2018"
 build = "build.rs"
 name = "ton_types"
-version = "0.21.17"
-edition = "2018"
+version = "0.21.111"
 
 [dependencies]
 

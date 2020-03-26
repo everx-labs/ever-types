@@ -12,15 +12,6 @@
 * limitations under the License.
 */
 
-// External
-extern crate crc;
-#[macro_use]
-extern crate log;
-extern crate num;
-extern crate sha2;
-#[macro_use]
-extern crate num_derive;
-
 #[macro_use]
 pub mod types;
 pub use self::types::Result;
@@ -29,7 +20,6 @@ pub mod cell;
 pub use self::cell::*;
 pub mod dictionary;
 pub use self::dictionary::*;
-
 pub mod cells_serialization;
 
 pub trait Mask {

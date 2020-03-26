@@ -294,7 +294,7 @@ pub(crate) fn get_min<T: HashmapType>(cell: Option<Cell>, bit_len: usize, max_le
         let mut root = gas_consumer.load_cell(cell);
         if signed && root.clone().get_label(bit_len)?.is_empty() {
             if root.remaining_references() < 2 {
-                failure::bail!(ExceptionCode::CellUnderflow)
+                fail!(ExceptionCode::CellUnderflow)
             }
             let ref mut fork = gas_consumer.load_cell(root.reference(1)?);
             if let (Some(path), leaf) = T::down_to_leaf(fork, bit_len - 1, max_len - 1, 0, gas_consumer)? {
@@ -315,7 +315,7 @@ pub(crate) fn get_max<T: HashmapType>(cell: Option<Cell>, bit_len: usize, max_le
         let mut root = gas_consumer.load_cell(cell);
         if signed && root.clone().get_label(bit_len)?.is_empty() {
             if root.remaining_references() < 2 {
-                failure::bail!(ExceptionCode::CellUnderflow)
+                fail!(ExceptionCode::CellUnderflow)
             }
             let ref mut fork = gas_consumer.load_cell(root.reference(0)?);
             if let (Some(path), leaf) = T::down_to_leaf(fork, bit_len - 1, max_len - 1, 1, gas_consumer)? {
@@ -526,7 +526,7 @@ fn put_to_fork_with_mode<T: HashmapType>(
     // hmn_fork#_ {n:#} {X:Type} left:^(Hashmap n X) right:^(Hashmap n X) = HashmapNode (n+1) X;
     let mut builder = BuilderData::new();
     if slice.remaining_references() != 2 {
-        failure::bail!(ExceptionCode::CellUnderflow)
+        fail!(ExceptionCode::CellUnderflow)
     } else {
         if next_index == 1 {
             builder.append_reference_cell(slice.checked_drain_reference()?.clone())
@@ -562,7 +562,7 @@ fn put_to_node_with_mode<T: HashmapType>(
                 *cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(key, bit_len, true, leaf)?);
             }
         } else {
-            failure::bail!(ExceptionCode::FatalError)
+            fail!(ExceptionCode::FatalError)
         }
     } else if label.is_empty() {
         // 1-bit edge
@@ -616,8 +616,13 @@ fn put_to_node_with_mode<T: HashmapType>(
                 }
             }
             error @ (_, _, _) => {
-                error!(target: "tvm", "If we hit this, there's certainly a bug. {:?}. Passed: label: {}, key: {} ", error, label, key);
-                failure::bail!(ExceptionCode::FatalError)
+                log::error!(
+                    target: "tvm",  
+                    "If we hit this, there's certainly a bug. {:?}. \
+                     Passed: label: {}, key: {} ", 
+                    error, label, key
+                );
+                fail!(ExceptionCode::FatalError)
             }
         }
     };

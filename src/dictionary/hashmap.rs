@@ -63,7 +63,7 @@ impl HashmapE {
                 cell.checked_append_references_and_data(&SliceData::from(root))?;
                 Ok(())
             }
-            None => failure::bail!(ExceptionCode::CellUnderflow)
+            None => fail!(ExceptionCode::CellUnderflow)
         }
     }
     /// serialize hashmapE to cell

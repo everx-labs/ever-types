@@ -116,7 +116,7 @@ impl SliceData {
 
     pub fn from_string(value: &str) -> Result<SliceData> {
         parse_slice_base(value, 0, 16)
-            .ok_or(failure::err_msg(ExceptionCode::FatalError))
+            .ok_or(error!(ExceptionCode::FatalError))
             .and_then(|vec| BuilderData::with_bitstring(vec))
             .map(|builder| builder.into())
     }
@@ -233,7 +233,7 @@ impl SliceData {
         if self.references_window.start + i < self.references_window.end {
             self.cell.reference(self.references_window.start + i)
         } else {
-            failure::bail!(ExceptionCode::CellUnderflow)
+            fail!(ExceptionCode::CellUnderflow)
         }
     }
 
@@ -253,7 +253,7 @@ impl SliceData {
         if self.remaining_references() != 0 {
             Ok(self.drain_reference())
         } else {
-            failure::bail!(ExceptionCode::CellUnderflow)
+            fail!(ExceptionCode::CellUnderflow)
         }
     }
     fn drain_reference(&mut self) -> Cell {
@@ -274,7 +274,7 @@ impl SliceData {
     /// Returns subslice of current slice
     pub fn get_slice(&self, offset: usize, size: usize) -> Result<SliceData> {
         if offset + size > self.remaining_bits() {
-            failure::bail!(ExceptionCode::CellUnderflow)
+            fail!(ExceptionCode::CellUnderflow)
         }
         let mut slice = self.clone();
         slice.shrink_data(offset..offset + size);
@@ -284,10 +284,10 @@ impl SliceData {
 
     pub fn get_bits(&self, offset: usize, bits: usize) -> Result<u8> {
         if offset + bits > self.remaining_bits() {
-            failure::bail!(ExceptionCode::CellUnderflow)
+            fail!(ExceptionCode::CellUnderflow)
         }
         if bits == 0 || bits > 8 {
-            failure::bail!(ExceptionCode::RangeCheckError)
+            fail!(ExceptionCode::RangeCheckError)
         }
         let index = self.data_window.start + offset;
         let q = index / 8;
@@ -314,7 +314,7 @@ impl SliceData {
 
     pub fn get_next_bits(&mut self, bits: usize) -> Result<Vec<u8>> {
         if bits > self.remaining_bits() {
-            failure::bail!(ExceptionCode::CellUnderflow)
+            fail!(ExceptionCode::CellUnderflow)
         }
         let bytes = bits / 8;
         let mut vec = (0..bytes).map(|i| self.get_byte(i * 8).unwrap()).collect::<Vec<_>>();
@@ -363,13 +363,13 @@ impl SliceData {
 
     pub fn get_next_int(&mut self, bits: usize) -> Result<u64> {
         if bits > self.remaining_bits() {
-            failure::bail!(ExceptionCode::CellUnderflow)
+            fail!(ExceptionCode::CellUnderflow)
         }
         if bits == 0 {
             return Ok(0)
         }
         if bits > 64 {
-            failure::bail!(ExceptionCode::RangeCheckError)
+            fail!(ExceptionCode::RangeCheckError)
         }
         let mut value: u64 = 0;
         let bytes = bits / 8;
@@ -449,7 +449,7 @@ impl SliceData {
 
     pub fn get_next_bytes(&mut self, bytes: usize) -> Result<Vec<u8>> {
         if bytes * 8 > self.remaining_bits() {
-            failure::bail!(ExceptionCode::CellUnderflow)
+            fail!(ExceptionCode::CellUnderflow)
         }
         Ok((0..bytes).map(|_| self.get_next_byte().unwrap()).collect::<Vec<_>>())
     }
@@ -483,7 +483,7 @@ impl SliceData {
             self.data_window.start += offset;
             Ok(())
         } else {
-            failure::bail!(ExceptionCode::CellUnderflow)
+            fail!(ExceptionCode::CellUnderflow)
         }
     }
 
@@ -507,7 +507,7 @@ impl SliceData {
                     true
                 }
                 (_, None, _) => {
-                    warn!(target: "tvm", "unreachable in erase_prefix {} {}", self, prefix);
+                    log::warn!(target: "tvm", "unreachable in erase_prefix {} {}", self, prefix);
                     self.shrink_data(0..0);
                     true
                 },

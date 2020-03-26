@@ -20,6 +20,31 @@ use num::FromPrimitive;
 use std::fmt::{LowerHex, UpperHex};
 
 
+pub type Result<T> = std::result::Result<T, failure::Error>;
+
+#[macro_export]
+macro_rules! error {
+    ($error:literal) => {
+        failure::err_msg($error)
+    };
+    ($error:expr) => {
+        failure::Error::from($error)
+    }
+}
+
+#[macro_export]
+macro_rules! fail {
+    ($error:literal) => {
+        return Err(failure::err_msg($error))
+    };
+    ($error:expr) => {
+        return Err(error!($error))
+    };
+    ($fmt:expr, $($arg:tt)*) => {
+        return Err(failure::err_msg(format!($fmt, $($arg)*)))
+    }
+}
+
 #[derive(Clone, Default, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct UInt256([u8; 32]);
 
@@ -73,33 +98,49 @@ impl str::FromStr for AccountId {
 
 // Exceptions *****************************************************************
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
-#[derive(Clone, Copy, Debug, FromPrimitive, PartialEq)]
+#[derive(Clone, Copy, Debug, num_derive::FromPrimitive, PartialEq, failure::Fail)]
 pub enum ExceptionCode {
-    NormalTermination       = 0,
-    AlternativeTermination  = 1,
-    StackUnderflow          = 2,
-    StackOverflow           = 3,
-    IntegerOverflow         = 4,
-    RangeCheckError         = 5,
-    InvalidOpcode           = 6,
-    TypeCheckError          = 7,
-    CellOverflow            = 8,
-    CellUnderflow           = 9,
-    DictionaryError         = 10,
-    UnknownError            = 11,
-    FatalError              = 12,
-    OutOfGas                = 13
+    #[fail(display = "normal termination")]
+    NormalTermination = 0,
+    #[fail(display = "alternative termination")]
+    AlternativeTermination = 1,
+    #[fail(display = "stack underflow")]
+    StackUnderflow = 2,
+    #[fail(display = "stack overflow")]
+    StackOverflow = 3,
+    #[fail(display = "integer overflow")]
+    IntegerOverflow = 4,
+    #[fail(display = "range check error")]
+    RangeCheckError = 5,
+    #[fail(display = "invalid opcode")]
+    InvalidOpcode = 6,
+    #[fail(display = "type check error")]
+    TypeCheckError = 7,
+    #[fail(display = "cell overflow")]
+    CellOverflow = 8,
+    #[fail(display = "cell underflow")]
+    CellUnderflow = 9,
+    #[fail(display = "dictionaty error")]
+    DictionaryError = 10,
+    #[fail(display = "unknown error")]
+    UnknownError = 11,
+    #[fail(display = "fatal error")]
+    FatalError = 12,
+    #[fail(display = "out of gas")]
+    OutOfGas = 13
 }
 
+/*
 impl fmt::Display for ExceptionCode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.message())
     }
 }
+*/
 
 #[cfg_attr(rustfmt, rustfmt_skip)]
 impl ExceptionCode {
+/*
     pub fn message(&self) -> &'static str {
         match self {
             ExceptionCode::NormalTermination        => "normal termination",
@@ -118,14 +159,13 @@ impl ExceptionCode {
             ExceptionCode::OutOfGas                 => "out of gas error"
         }
     }
-
+*/
     pub fn from_usize(number: usize) -> Option<ExceptionCode> {
         FromPrimitive::from_usize(number)
     }
 }
 
 pub type Bitmask = u8;
-pub type Result<T> = std::result::Result<T, failure::Error>;
 
 impl From<[u8;32]> for UInt256 {
     fn from(data: [u8;32]) -> Self {
@@ -166,12 +206,15 @@ impl UInt256 {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, failure::Fail)]
 pub enum ParseAccountIdError {
+    #[fail(display = "invalid account ID string length (64 expected)")]
     SizeError,
+    #[fail(display = "invalid character while parsing account ID hex string")]
     HexError
 }
 
+/*
 impl fmt::Display for ParseAccountIdError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
@@ -184,18 +227,18 @@ impl fmt::Display for ParseAccountIdError {
         )
     }
 }
+*/
 
 impl str::FromStr for UInt256 {
     type Err = failure::Error;
     fn from_str(value: &str) -> Result<Self> {
         if value.len() != 64 {
-            failure::bail!(ParseAccountIdError::SizeError)
+            fail!(ParseAccountIdError::SizeError)
         } else {
             let mut data: [u8;32] = [0;32];
             for i in 0..data.len() {
                 let hex = &value[2*i..2+2*i];
-                data[i] = u8::from_str_radix(hex, 16)
-                    .map_err(|_| failure::err_msg(ParseAccountIdError::HexError))?;
+                data[i] = u8::from_str_radix(hex, 16).map_err(|_| ParseAccountIdError::HexError)?;
             }
             Ok(UInt256::from(data))
         }

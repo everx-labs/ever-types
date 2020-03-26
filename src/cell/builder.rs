@@ -72,9 +72,9 @@ impl BuilderData {
 
     pub fn with_raw(mut data: Vec<u8>, length_in_bits: usize) -> Result<BuilderData> {
         if length_in_bits > data.len() * 8 {
-            failure::bail!(ExceptionCode::FatalError)
+            fail!(ExceptionCode::FatalError)
         } else if length_in_bits > BuilderData::bits_capacity() {
-            failure::bail!(ExceptionCode::CellOverflow)
+            fail!(ExceptionCode::CellOverflow)
         }
         let data_shift = length_in_bits % 8;
         if data_shift == 0 {
@@ -110,9 +110,9 @@ impl BuilderData {
         if length_in_bits == 0 {
             Ok(BuilderData::new())
         } else if length_in_bits > data.len() * 8 {
-            failure::bail!(ExceptionCode::FatalError)
+            fail!(ExceptionCode::FatalError)
         } else if length_in_bits > BuilderData::bits_capacity() {
-            failure::bail!(ExceptionCode::CellOverflow)
+            fail!(ExceptionCode::CellOverflow)
         } else {
             BuilderData::with_raw(data, length_in_bits)
         }
@@ -211,9 +211,9 @@ impl BuilderData {
 
     pub fn append_raw(&mut self, slice: &[u8], bits: usize) -> Result<&mut Self> {
         if slice.len() * 8 < bits {
-            failure::bail!(ExceptionCode::FatalError)
+            fail!(ExceptionCode::FatalError)
         } else if (self.length_in_bits() + bits) > BuilderData::bits_capacity() {
-            failure::bail!(ExceptionCode::CellOverflow)
+            fail!(ExceptionCode::CellOverflow)
         } else if bits != 0 {
             if (self.length_in_bits() % 8) == 0 {
                 if (bits % 8) == 0 {

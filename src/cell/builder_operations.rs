@@ -48,7 +48,7 @@ impl BuilderData {
     // TODO: check here cyclic appending
     pub fn checked_append_reference(&mut self, cell: Cell) -> Result<&mut Self> {
         if self.references().len() >= MAX_REFERENCES_COUNT {
-            failure::bail!(ExceptionCode::CellOverflow)
+            fail!(ExceptionCode::CellOverflow)
         } else {
             self.append_reference_cell(cell);
             Ok(self)
@@ -61,7 +61,7 @@ impl BuilderData {
 
     pub fn checked_append_references_and_data(&mut self, other: &SliceData) -> Result<&mut Self> {
         if self.bits_free() < other.remaining_bits() || self.references_free() < other.remaining_references() {
-            failure::bail!(ExceptionCode::CellOverflow)
+            fail!(ExceptionCode::CellOverflow)
         }
         self.append_raw(other.get_bytestring(0).as_slice(), other.remaining_bits())?;
         for i in 0..other.remaining_references() {
@@ -109,7 +109,7 @@ impl IBitstring for BuilderData {
             }
             Ok(self)
         } else {
-            failure::bail!(ExceptionCode::CellOverflow)
+            fail!(ExceptionCode::CellOverflow)
         }
     }
     fn append_bitstring(&mut self, data: &[u8]) -> Result<&mut Self> {

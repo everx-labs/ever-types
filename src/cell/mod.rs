@@ -29,7 +29,8 @@ pub const MAX_LEVEL: u8 = 3;
 pub const MAX_DEPTH: u16 = 1024;
 
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy, Hash, FromPrimitive, ToPrimitive)]
+#[derive(Debug, Eq, PartialEq, Clone, Copy, Hash)]
+#[derive(num_derive::FromPrimitive, num_derive::ToPrimitive)]
 pub enum CellType {
     Unknown,
     Ordinary,
@@ -50,7 +51,7 @@ impl LevelMask {
             2 => 3,
             3 => 7,
             _ => {
-                error!(target: "tvm", "{} {}", file!(), line!());
+                log::error!(target: "tvm", "{} {}", file!(), line!());
                 0
             }
         })
@@ -60,7 +61,7 @@ impl LevelMask {
         if mask <= 7 {
             LevelMask(mask)
         } else {
-            error!(target: "tvm", "{} {}", file!(), line!());
+            log::error!(target: "tvm", "{} {}", file!(), line!());
             LevelMask(0)
         }
     }
@@ -71,7 +72,7 @@ impl LevelMask {
 
     pub fn level(&self) -> u8 {
         if self.0 > 7 {
-            error!(target: "tvm", "{} {}", file!(), line!());
+            log::error!(target: "tvm", "{} {}", file!(), line!());
             255
         } else {
             // count of set bits (low three)
@@ -612,7 +613,7 @@ impl CellData {
                 return *d
             }
         }
-        error!(target: "tvm", "cell is not finalized");
+        log::error!(target: "tvm", "cell is not finalized");
         0
     }
 
@@ -745,11 +746,11 @@ impl DataCell {
                 if bit_len != 8 * (1 + 1 + (self.level() as usize) * (SHA256_SIZE + 2)) ||
                     self.references.len() > 0
                 {
-                    failure::bail!(ExceptionCode::RangeCheckError)
+                    fail!(ExceptionCode::RangeCheckError)
                 }
                 if self.data()[0] != u8::from(CellType::PrunedBranch) ||
                    self.data()[1] != self.level_mask().mask() {
-                    failure::bail!(ExceptionCode::FatalError)
+                    fail!(ExceptionCode::FatalError)
                 }
             },
             CellType::MerkleProof => {
@@ -757,7 +758,7 @@ impl DataCell {
                 if bit_len != 8 * (1 + SHA256_SIZE + 2) ||
                     self.references.len() != 1
                 {
-                    failure::bail!(ExceptionCode::RangeCheckError)
+                    fail!(ExceptionCode::RangeCheckError)
                 }
                 // TODO check hashes and depths
             },
@@ -766,17 +767,17 @@ impl DataCell {
                 if bit_len != 8 * (1 + 2 * (SHA256_SIZE + 2)) ||
                     self.references.len() != 2
                 {
-                    failure::bail!(ExceptionCode::RangeCheckError)
+                    fail!(ExceptionCode::RangeCheckError)
                 }
                 // TODO check hashes and depths
             },
             CellType::Ordinary => {
                 if bit_len > MAX_DATA_BITS || self.references.len() > MAX_REFERENCES_COUNT {
-                    failure::bail!(ExceptionCode::CellOverflow)
+                    fail!(ExceptionCode::CellOverflow)
                 }
             },
             CellType::LibraryReference => { },
-            CellType::Unknown => failure::bail!(ExceptionCode::RangeCheckError)
+            CellType::Unknown => fail!(ExceptionCode::RangeCheckError)
         }
 
         // Check level
@@ -791,10 +792,10 @@ impl DataCell {
             CellType::LibraryReference => LevelMask::with_mask(0), // TODO ???
             CellType::MerkleProof => LevelMask::for_merkle_cell(children_mask),
             CellType::MerkleUpdate => LevelMask::for_merkle_cell(children_mask),
-            CellType::Unknown => failure::bail!(ExceptionCode::RangeCheckError)
+            CellType::Unknown => fail!(ExceptionCode::RangeCheckError)
         };
         if self.level_mask() != level_mask {
-            failure::bail!(ExceptionCode::RangeCheckError)
+            fail!(ExceptionCode::RangeCheckError)
         }
 
         // calculate hashes and depths
@@ -850,10 +851,10 @@ impl DataCell {
 
         if self.store_hashes() {
             if &depths != self.depths().as_ref().expect("cell have to store depths") {
-                failure::bail!(ExceptionCode::FatalError)
+                fail!(ExceptionCode::FatalError)
             }
             if &hashes != self.hashes().as_ref().expect("cell have to store hashes") {
-                failure::bail!(ExceptionCode::FatalError)
+                fail!(ExceptionCode::FatalError)
             }
         } else {
             self.set_hashes(Some(hashes));
@@ -901,7 +902,7 @@ impl CellImpl for DataCell {
     }
 
     fn reference(&self, index: usize) -> Result<Cell> {
-        self.references.get(index).cloned().ok_or(failure::err_msg(ExceptionCode::CellUnderflow))
+        self.references.get(index).cloned().ok_or(error!(ExceptionCode::CellUnderflow))
     }
 
     fn cell_type(&self) -> CellType {
