@@ -32,6 +32,32 @@ pub struct SliceData {
     references_window: Range<usize>,
 }
 
+impl PartialOrd for SliceData {
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for SliceData {
+    fn cmp(&self, other: &Self) -> cmp::Ordering {
+        match self.remaining_bits().cmp(&other.remaining_bits()) {
+            cmp::Ordering::Equal => {
+                let vec1 = self.get_bytestring(0);
+                let vec2 = other.get_bytestring(0);
+                let len = vec1.len();
+                for i in 0..len {
+                    let ordering = vec1[i].cmp(&vec2[i]);
+                    if ordering != cmp::Ordering::Equal {
+                        return ordering
+                    }
+                }
+                cmp::Ordering::Equal
+            }
+            ordering @ _ => ordering
+        }
+    }
+}
+
 impl Hash for SliceData {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.get_bytestring(0).hash(state);
