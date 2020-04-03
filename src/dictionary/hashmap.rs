@@ -158,6 +158,14 @@ impl HashmapE {
     pub fn into_subtree_without_prefix(&mut self, prefix: SliceData, gas_consumer: &mut dyn GasConsumer) -> Result<()> {
         hashmap_into_subtree_without_prefix::<Self>(self, prefix, gas_consumer)
     }
+    /// split to subtrees by key
+    pub fn split(&self, key: &SliceData) -> Result<(Self, Self)> {
+        self.hashmap_split(key).map(|(left, right)| (Self::with_hashmap(self.bit_len, left), Self::with_hashmap(self.bit_len, right)))
+    }
+    /// Merge other tree to current roots should be at least merge key
+    pub fn merge(&mut self, other: &Self, key: &SliceData) -> Result<()> {
+        self.hashmap_merge(other, key)
+    }
 }
 
 // hm_edge#_ {n:#} {X:Type} {l:#} {m:#} label:(HmLabel ~l n)

@@ -477,6 +477,103 @@ pub trait HashmapType {
         }
         Ok(count)
     }
+    // counts elements to max counter - can be used as validate
+    fn count(&self, max: usize) -> Result<usize> {
+        let mut count = 0;
+        if let Some(root) = self.data() {
+            iterate_internal(
+                &mut SliceData::from(root),
+                BuilderData::default(),
+                self.bit_len(),
+                &mut |_,_| {
+                    count += 1;
+                    Ok(count < max)
+                }
+            )?;
+        }
+        Ok(count)
+    }
+    // split
+    fn hashmap_split(&self, key: &SliceData) -> Result<(Option<Cell>, Option<Cell>)> {
+        let mut bit_len = self.bit_len();
+        let data = match self.data() {
+            Some(data) => data,
+            _ => return Ok((None, None))
+        };
+        let mut cursor = SliceData::from(data.clone());
+        let label = cursor.get_label(bit_len)?;
+        let (left, right) = match SliceData::common_prefix(&label, key) {
+            // normal case label == key
+            (_prefix, None, None) => {
+                bit_len -= label.remaining_bits() + 1;
+                (cursor.reference(0)?, cursor.reference(1)?)
+            }
+            // normal case with empty branch
+            (_prefix, Some(mut label_remainder), None) => match label_remainder.get_next_bit()? {
+                false => return Ok((Some(data.clone()), None)),
+                true  => return Ok((None, Some(data.clone()))),
+            }
+            // wrong hashmap tree
+            _ => fail!("split fail: root label: x{} and key: x{}", label.to_hex_string(), key.to_hex_string()),
+        };
+        cursor = SliceData::from(left);
+        let label = cursor.get_label(bit_len)?;
+        let mut builder = BuilderData::from_slice(&key);
+        builder.append_bit_zero()?;
+        builder.append_bytestring(&label)?;
+        let left = Self::make_cell_with_label_and_data(builder.into(), self.bit_len(), false, &cursor)?;
+
+        cursor = SliceData::from(right);
+        let label = cursor.get_label(bit_len)?;
+        let mut builder = BuilderData::from_slice(&key);
+        builder.append_bit_one()?;
+        builder.append_bytestring(&label)?;
+        let right = Self::make_cell_with_label_and_data(builder.into(), self.bit_len(), false, &cursor)?;
+
+        Ok((Some(left.into()), Some(right.into())))
+    }
+    // merge
+    fn hashmap_merge(&mut self, other: &Self, key: &SliceData) -> Result<()> {
+        let mut bit_len = self.bit_len();
+        if bit_len != other.bit_len() || key.remaining_bits() > bit_len {
+            return Ok(()) // fail!("data in hashmaps do not correspond each other or key too long")
+        }
+        let mut cursor = match self.data() {
+            Some(data) => SliceData::from(data),
+            None => {
+                *self.data_mut() = other.data().cloned();
+                return Ok(())
+            }
+        };
+        let mut other = match other.data() {
+            Some(data) => SliceData::from(data),
+            None => return Ok(())
+        };
+        let label1 = cursor.get_label(bit_len)?;
+        let label2 = other.get_label(bit_len)?;
+        match SliceData::common_prefix(&label1, &label2) {
+            (prefix, Some(mut left), Some(mut right)) => {
+                let left_bit = left.get_next_bit()?;
+                let right_bit = right.get_next_bit()?;
+                if left_bit && !right_bit {
+                    std::mem::swap(&mut left, &mut right);
+                    std::mem::swap(&mut cursor, &mut other);
+                } else if left_bit == right_bit {
+                    fail!("bug in common_prefix is impossible")
+                }
+                let is_leaf1 = Self::is_leaf(&mut cursor);
+                let is_leaf2 = Self::is_leaf(&mut other);
+                let prefix = prefix.unwrap_or_default();
+                let mut root = Self::make_cell_with_label(prefix, bit_len)?;
+                bit_len -= root.length_in_bits() + 1;
+                root.append_reference(Self::make_cell_with_label_and_data(left, bit_len, is_leaf1, &cursor)?);
+                root.append_reference(Self::make_cell_with_label_and_data(right, bit_len, is_leaf2, &other)?);
+                *self.data_mut() = Some(root.into());
+            }
+            _ => fail!("Cannot merge")
+        }
+        Ok(())
+    }
 }
 
 /// iterate all elements with callback function
@@ -491,7 +588,7 @@ where
 {
     let label = cursor.get_label(bit_len)?;
     let label_length = label.remaining_bits();
-    debug_assert!(label_length <= bit_len);
+    debug_assert!(label_length <= bit_len, "label_length: {}, bit_len: {}", label_length, bit_len);
     if label_length < bit_len {
         bit_len -= label_length + 1;
         let n = cmp::min(2, cursor.remaining_references());
