@@ -144,11 +144,11 @@ impl HashmapE {
     }
     /// gets item with minimal key
     pub fn get_min(&self, signed: bool, gas_consumer: &mut dyn GasConsumer) -> KeyLeaf {
-        get_min::<Self>(self.data.as_ref().cloned(), self.bit_len, self.bit_len, signed, gas_consumer)
+        get_min::<Self>(self.data.clone(), self.bit_len, self.bit_len, signed, gas_consumer)
     }
     /// gets item with maximal key
     pub fn get_max(&self, signed: bool, gas_consumer: &mut dyn GasConsumer) -> KeyLeaf {
-        get_max::<Self>(self.data.as_ref().cloned(), self.bit_len, self.bit_len, signed, gas_consumer)
+        get_max::<Self>(self.data.clone(), self.bit_len, self.bit_len, signed, gas_consumer)
     }
     /// transform to subtree with the common prefix
     pub fn into_subtree_with_prefix(&mut self, prefix: SliceData, gas_consumer: &mut dyn GasConsumer) -> Result<()> {

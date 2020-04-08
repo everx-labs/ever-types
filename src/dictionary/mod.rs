@@ -289,7 +289,7 @@ fn find_leaf<T: HashmapType>(
     Ok((None, None))
 }
 
-pub(crate) fn get_min<T: HashmapType>(cell: Option<Cell>, bit_len: usize, max_len: usize, signed: bool, gas_consumer: &mut dyn GasConsumer) -> KeyLeaf {
+pub fn get_min<T: HashmapType>(cell: Option<Cell>, bit_len: usize, max_len: usize, signed: bool, gas_consumer: &mut dyn GasConsumer) -> KeyLeaf {
     if let Some(cell) = cell {
         let mut root = gas_consumer.load_cell(cell);
         if signed && root.clone().get_label(bit_len)?.is_empty() {
@@ -310,7 +310,7 @@ pub(crate) fn get_min<T: HashmapType>(cell: Option<Cell>, bit_len: usize, max_le
     }
 }
 
-pub(crate) fn get_max<T: HashmapType>(cell: Option<Cell>, bit_len: usize, max_len: usize, signed: bool, gas_consumer: &mut dyn GasConsumer) -> KeyLeaf {
+pub fn get_max<T: HashmapType>(cell: Option<Cell>, bit_len: usize, max_len: usize, signed: bool, gas_consumer: &mut dyn GasConsumer) -> KeyLeaf {
     if let Some(cell) = cell {
         let mut root = gas_consumer.load_cell(cell);
         if signed && root.clone().get_label(bit_len)?.is_empty() {
