@@ -21,8 +21,8 @@ use std::ops::{Bound, Range, RangeBounds};
 
 use num::{BigInt, bigint::Sign};
 
-use crate::{BuilderData, Cell, CellType, LevelMask, parse_slice_base};
-use crate:: types::{ExceptionCode, Result, UInt256};
+use crate::{error, fail, cell::{BuilderData, Cell, CellType, LevelMask}, parse_slice_base};
+use crate::types::{ExceptionCode, Result, UInt256};
 
 
 #[derive(Eq, Clone)]

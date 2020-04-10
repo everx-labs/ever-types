@@ -14,7 +14,8 @@
 
 use std::cmp;
 
-use crate::{BuilderData, Cell, IBitstring, SliceData};
+use crate::{error, fail};
+use crate::cell::{BuilderData, Cell, IBitstring, SliceData};
 use crate::GasConsumer;
 use crate::Mask;
 use crate::types::{ExceptionCode, Result};

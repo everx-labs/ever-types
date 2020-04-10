@@ -12,7 +12,7 @@
 * limitations under the License.
 */
 
-use super::SliceData;
+use crate::cell::SliceData;
 use std::fmt;
 use std::str;
 use std::cmp;
@@ -48,10 +48,66 @@ macro_rules! fail {
 #[derive(Clone, Default, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct UInt256([u8; 32]);
 
+impl UInt256 {
+    pub fn is_zero(&self) -> bool {
+        for b in &self.0 {
+            if b != &0 {
+                return false
+            }
+        }
+        true
+    }
+
+    pub fn as_slice(&self) -> &[u8;32] {
+        &self.0
+    }
+
+    // Returns solid string like this: a80b23bfe4d301497f3ce11e753f23e8dec32368945ee279d044dbc1f91ace2a
+    pub fn to_hex_string(&self) -> String {
+        hex::encode(self.0)
+    }
+}
+
+impl From<[u8;32]> for UInt256 {
+    fn from(data: [u8;32]) -> Self {
+        UInt256(data)
+    }
+}
+
+impl<'a> From<&'a [u8;32]> for UInt256 {
+    fn from(data: &[u8;32]) -> Self {
+        UInt256(data.clone())
+    }
+}
+
+impl From<&[u8]> for UInt256 {
+    fn from(value: &[u8]) -> Self {
+        let mut data = [0; 32];
+        let len = cmp::min(value.len(), 32);
+        (0..len).for_each(|i| data[i] = value[i]);
+        Self(data)
+    }
+}
+
+impl From<Vec<u8>> for UInt256 {
+    fn from(value: Vec<u8>) -> Self {
+        UInt256::from(value.as_slice())
+    }
+}
+
 impl fmt::Debug for UInt256 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         LowerHex::fmt(self, f)
     }
+}
+
+impl fmt::Display for UInt256 {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(
+            f,
+            "UInt256[{:X?}]", self.as_slice()
+        )
+    }    
 }
 
 impl LowerHex for UInt256 {
@@ -69,6 +125,28 @@ impl UpperHex for UInt256 {
             write!(f, "0x")?;
         }
         write!(f, "{}", hex::encode_upper(&self.0))
+    }
+}
+
+impl str::FromStr for UInt256 {
+    type Err = failure::Error;
+    fn from_str(value: &str) -> Result<Self> {
+        if value.len() != 64 {
+            fail!(ParseAccountIdError::SizeError)
+        } else {
+            let mut data: [u8;32] = [0;32];
+            for i in 0..data.len() {
+                let hex = &value[2*i..2+2*i];
+                data[i] = u8::from_str_radix(hex, 16).map_err(|_| ParseAccountIdError::HexError)?;
+            }
+            Ok(UInt256::from(data))
+        }
+    }
+}
+
+impl std::convert::AsRef<[u8]> for &UInt256 {
+    fn as_ref(&self) -> &[u8] {
+        self.as_slice()
     }
 }
 
@@ -165,47 +243,6 @@ impl ExceptionCode {
     }
 }
 
-pub type Bitmask = u8;
-
-impl From<[u8;32]> for UInt256 {
-    fn from(data: [u8;32]) -> Self {
-        UInt256(data)
-    }
-}
-
-impl<'a> From<&'a [u8;32]> for UInt256 {
-    fn from(data: &[u8;32]) -> Self {
-        UInt256(data.clone())
-    }
-}
-
-impl From<&[u8]> for UInt256 {
-    fn from(value: &[u8]) -> Self {
-        let mut data = [0; 32];
-        let len = cmp::min(value.len(), 32);
-        (0..len).for_each(|i| data[i] = value[i]);
-        Self(data)
-    }
-}
-
-impl From<Vec<u8>> for UInt256
-{
-    fn from(value: Vec<u8>) -> Self {
-        UInt256::from(value.as_slice())
-    }
-}
-
-impl UInt256 {
-    pub fn as_slice(&self) -> &[u8;32] {
-        &self.0
-    }
-
-    // Returns solid string like this: a80b23bfe4d301497f3ce11e753f23e8dec32368945ee279d044dbc1f91ace2a
-    pub fn to_hex_string(&self) -> String {
-        hex::encode(self.0)
-    }
-}
-
 #[derive(Debug, failure::Fail)]
 pub enum ParseAccountIdError {
     #[fail(display = "invalid account ID string length (64 expected)")]
@@ -228,37 +265,6 @@ impl fmt::Display for ParseAccountIdError {
     }
 }
 */
-
-impl str::FromStr for UInt256 {
-    type Err = failure::Error;
-    fn from_str(value: &str) -> Result<Self> {
-        if value.len() != 64 {
-            fail!(ParseAccountIdError::SizeError)
-        } else {
-            let mut data: [u8;32] = [0;32];
-            for i in 0..data.len() {
-                let hex = &value[2*i..2+2*i];
-                data[i] = u8::from_str_radix(hex, 16).map_err(|_| ParseAccountIdError::HexError)?;
-            }
-            Ok(UInt256::from(data))
-        }
-    }
-}
-
-impl fmt::Display for UInt256 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "UInt256[{:X?}]", self.as_slice()
-        )
-    }    
-}
-
-impl std::convert::AsRef<[u8]> for &UInt256 {
-    fn as_ref(&self) -> &[u8] {
-        self.as_slice()
-    }
-}
 
 pub trait ByteOrderRead {
     fn read_be_uint(&mut self, bytes: usize) -> std::io::Result<usize>;
@@ -339,3 +345,5 @@ impl<T: std::io::Read> ByteOrderRead for T {
         Ok(buf)
     }
 }
+
+pub type Bitmask = u8;

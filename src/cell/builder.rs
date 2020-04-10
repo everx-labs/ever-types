@@ -15,7 +15,8 @@
 use std::convert::From;
 use std::fmt;
 
-use crate::{append_tag, Cell, CellType, DataCell, find_tag, LevelMask, SliceData};
+use crate::{error, fail};
+use crate::cell::{append_tag, Cell, CellType, DataCell, find_tag, LevelMask, SliceData};
 use crate::types::{ExceptionCode, Result};
 
 const EXACT_CAPACITY: usize = 128;

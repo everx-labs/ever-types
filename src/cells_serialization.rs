@@ -19,7 +19,7 @@ use std::io::{Read, Write};
 
 use crc::{crc32, Hasher32};
 
-use crate::{Cell, CellType, DataCell, LevelMask};
+use crate::cell::{Cell, CellType, DataCell, LevelMask};
 use crate::types::ByteOrderRead;
 use crate::types::UInt256;
 

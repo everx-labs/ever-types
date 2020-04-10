@@ -12,15 +12,17 @@
 * limitations under the License.
 */
 
-#[macro_use]
 pub mod types;
-pub use self::types::Result;
-#[macro_use]
+pub use self::types::*;
+
 pub mod cell;
 pub use self::cell::*;
+
 pub mod dictionary;
 pub use self::dictionary::*;
+
 pub mod cells_serialization;
+pub use cells_serialization::*;
 
 pub trait Mask {
     fn bit(&self, bits: Self) -> bool;
