@@ -19,7 +19,6 @@ use crate::cell::{BuilderData, Cell, IBitstring, SliceData};
 use crate::GasConsumer;
 use crate::Mask;
 use crate::types::{ExceptionCode, Result};
-
 pub use self::hashmap::HashmapE;
 pub use self::pfxhashmap::PfxHashmapE;
 
