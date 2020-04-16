@@ -13,6 +13,7 @@
 */
 
 use std::fmt;
+use std::collections::HashSet;
 
 use crate::types::ExceptionCode;
 
@@ -150,6 +151,35 @@ impl HashmapE {
     pub fn get_max(&self, signed: bool, gas_consumer: &mut dyn GasConsumer) -> KeyLeaf {
         get_max::<Self>(self.data.clone(), self.bit_len, self.bit_len, signed, gas_consumer)
     }
+
+    pub fn scan_diff<F>(&self, other: &Self, mut op: F) -> Result<bool> 
+    where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> {
+        let mut used_key : HashSet<SliceData> = HashSet::new();
+        if !self.iterate(&mut |key, value| {
+            used_key.insert(key.clone());
+            let value2 = other.get(key.clone())?;
+            if Some(value.clone()) != value2 {
+                if !op(key, Some(value.clone()), value2)? {
+                    return Ok(false);
+                }
+            }        
+            return Ok(true);
+        })? { 
+            return Ok(false); 
+        }
+        other.iterate(&mut |key, value| {
+            if !used_key.contains(&key) {
+                let value2 = self.get(key.clone())?;
+                if Some(value.clone()) != value2 {
+                    if !op(key, value2, Some(value.clone()))? {
+                        return Ok(false);
+                    }
+                }
+            }           
+            return Ok(true);
+        })
+    }
+
     /// transform to subtree with the common prefix
     pub fn into_subtree_with_prefix(&mut self, prefix: SliceData, gas_consumer: &mut dyn GasConsumer) -> Result<()> {
         hashmap_into_subtree_with_prefix::<Self>(self, prefix, gas_consumer)
