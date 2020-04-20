@@ -29,7 +29,10 @@ macro_rules! error {
     };
     ($error:expr) => {
         failure::Error::from($error)
-    }
+    };
+    ($fmt:expr, $($arg:tt)+) => {
+        failure::err_msg(format!($fmt, $($arg)*))
+    };
 }
 
 #[macro_export]
@@ -42,7 +45,7 @@ macro_rules! fail {
     };
     ($fmt:expr, $($arg:tt)*) => {
         return Err(failure::err_msg(format!($fmt, $($arg)*)))
-    }
+    };
 }
 
 #[derive(Clone, Default, PartialEq, Eq, Hash, Ord, PartialOrd)]
