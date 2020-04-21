@@ -41,8 +41,26 @@ pipeline {
                 sshagent([G_gitcred]) {
                     script {
                         G_giturl = env.GIT_URL
-                        G_commit = GIT_COMMIT
                         echo "${G_giturl}"
+                        if(isUpstream() && GIT_BRANCH != "master") {
+                            checkout(
+                                [$class: 'GitSCM', 
+                                branches: [[name: "origin/${GIT_BRANCH}"]], 
+                                doGenerateSubmoduleConfigurations: false, 
+                                extensions: [[
+                                    $class: 'PreBuildMerge', 
+                                    options: [
+                                        mergeRemote: 'origin', 
+                                        mergeTarget: 'master'
+                                    ]
+                                ]], 
+                                submoduleCfg: [], 
+                                userRemoteConfigs: [[credentialsId: 'TonJen', url: G_giturl]]])
+                            G_commit = sh (script: 'git rev-parse HEAD^{commit}', returnStdout: true).trim()
+                            echo "${GIT_COMMIT} merged with master. New commit ${G_commit}"
+                        } else {
+                            G_commit = GIT_COMMIT
+                        }
                         C_PROJECT = env.GIT_URL.substring(19, env.GIT_URL.length() - 4)
                         C_COMMITER = sh (script: 'git show -s --format=%cn ${GIT_COMMIT}', returnStdout: true).trim()
                         C_TEXT = sh (script: 'git show -s --format=%s ${GIT_COMMIT}', returnStdout: true).trim()
