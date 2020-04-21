@@ -74,8 +74,8 @@ pipeline {
                             G_images.put('ton-labs-types', params.image_ton_labs_types)
                         } else {
                             G_images.put('ton-labs-types', "tonlabs/ton-labs-types:source-${G_commit}")
-                            env.IMAGE = G_images['ton-labs-types']
                         }
+                        env.IMAGE = G_images['ton-labs-types']
                         echo "Build cause: ${currentBuild.getBuildCauses()[0].shortDescription}"
                     }
                 }
@@ -130,10 +130,6 @@ pipeline {
                     """
                 }
             }
-            post {
-                success { script { G_build = "success" } }
-                failure { script { G_build = "failure" } }
-            }
         }
         stage('Tests') {
             agent {
@@ -151,10 +147,6 @@ pipeline {
                         cargo test --release
                     """
                 }
-            }
-            post {
-                success { script { G_test = "success" } }
-                failure { script { G_test = "failure" } }
             }
         }
     }
