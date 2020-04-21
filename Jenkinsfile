@@ -69,6 +69,14 @@ pipeline {
                     
                         def buildCause = currentBuild.getBuildCauses()[0].shortDescription
                         echo "Build cause: ${buildCause}"
+
+                        if(params.image_ton_labs_types) {
+                            G_images.put('ton-labs-types', params.image_ton_labs_types)
+                        } else {
+                            G_images.put('ton-labs-types', "tonlabs/ton-labs-types:source-${G_commit}")
+                            env.IMAGE = G_images['ton-labs-types']
+                        }
+                        echo "Build cause: ${currentBuild.getBuildCauses()[0].shortDescription}"
                     }
                 }
             }
@@ -86,6 +94,21 @@ pipeline {
                         G_binversion = sh (script: "node tonVersion.js --set ${params.common_version} .", returnStdout: true).trim()
                     } else {
                         G_binversion = sh (script: "node tonVersion.js .", returnStdout: true).trim()
+                    }
+                }
+            }
+        }
+        stage('Prepare image') {
+            steps {
+                script {
+                    docker.withRegistry('', G_docker_creds) {
+                        args = "--pull --no-cache --label 'git-commit=${GIT_COMMIT}' --force-rm --target ton-labs-types-src ."
+                        G_docker_image = docker.build(
+                            G_images['ton-labs-types'], 
+                            args
+                        )
+                        echo "Image ${G_docker_image} as ${G_images['ton-labs-types']}"
+                        G_docker_image.push()
                     }
                 }
             }
