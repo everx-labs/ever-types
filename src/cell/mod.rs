@@ -621,12 +621,8 @@ impl CellData {
     /// Binary serialization of cell data
     pub fn serialize<T: Write>(&self, writer: &mut T) -> std::io::Result<()> {
         writer.write(&[self.cell_type.to_u8().unwrap()])?;
-
-        let data_size = self.data.len();
-        assert!(data_size <= u16::max_value() as usize);
-        writer.write(&(data_size as u16).to_le_bytes())?;
-        writer.write(&self.data[0..data_size])?;
-
+        writer.write(&self.bit_length.to_le_bytes())?;
+        writer.write(&self.data[0..(self.bit_length as usize + 8) / 8])?;
         writer.write(&[self.level])?;
         writer.write(&[if self.store_hashes { 1 } else { 0 }])?;
         if let Some(ref hashes) = self.hashes {
@@ -654,9 +650,9 @@ impl CellData {
     pub fn deserialize<T: Read>(reader: &mut T) -> std::io::Result<Self> {
         let cell_type: CellType = FromPrimitive::from_u8(reader.read_byte()?)
             .ok_or(ErrorKind::InvalidData)?;
-
-        let data_size = reader.read_le_u16()? as usize;
-        let mut data: Vec<u8> = vec![0; data_size];
+        let bit_length = reader.read_le_u16()?;
+        let data_len = ((bit_length + 8) / 8) as usize;
+        let mut data: Vec<u8> = vec![0; data_len];
         reader.read_exact(&mut data)?;
         let level = reader.read_byte()?;
         let store_hashes = Self::read_bool(reader)?;
