@@ -21,7 +21,7 @@ use std::ops::{Bound, Range, RangeBounds};
 
 use num::{BigInt, bigint::Sign};
 
-use crate::{error, fail, cell::{BuilderData, Cell, CellType, LevelMask}, parse_slice_base};
+use crate::{error, fail, cell::{BuilderData, Cell, CellType, IBitstring, LevelMask}, parse_slice_base};
 use crate::types::{ExceptionCode, Result, UInt256};
 
 
@@ -589,6 +589,21 @@ impl SliceData {
             if rem_a.remaining_bits() > 0 { Some(rem_a) } else { None },
             if rem_b.remaining_bits() > 0 { Some(rem_b) } else { None },
         );
+    }
+
+    pub fn overwrite_prefix(&mut self, prefix: &SliceData) -> Result<()> {
+        if prefix.is_empty() {
+            Ok(())
+
+        } else if self.remaining_bits() < prefix.remaining_bits() {
+            fail!("Prefix should be fully in self")
+        } else {
+            let mut builder = BuilderData::from_slice(prefix);
+            self.move_by(prefix.remaining_bits())?;
+            builder.append_bytestring(self)?;
+            *self = builder.into();
+            Ok(())
+        }
     }
 
     pub fn cell_type(&self) -> CellType {
