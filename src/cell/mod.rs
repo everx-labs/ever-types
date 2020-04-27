@@ -903,7 +903,7 @@ impl CellImpl for DataCell {
     }
 
     fn reference(&self, index: usize) -> Result<Cell> {
-        self.references.get(index).cloned().ok_or(error!(ExceptionCode::CellUnderflow))
+        self.references.get(index).cloned().ok_or_else(|| error!(ExceptionCode::CellUnderflow))
     }
 
     fn cell_type(&self) -> CellType {

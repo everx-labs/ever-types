@@ -195,8 +195,9 @@ fn find_leaf<T: HashmapType>(
     signed_int: bool,
     gas_consumer: &mut dyn GasConsumer
 ) -> KeyLeaf {
+    T::check_key_fail(bit_len, &key)?;
     let dict = match dict {
-        Some(dict) if !key.is_empty() && T::check_key(bit_len, &key) => dict,
+        Some(dict) => dict,
         _ => return Ok((None, None))
     };
     let (next_index, order): (usize, fn(&SliceData, &SliceData) -> bool) = if next {
@@ -353,6 +354,12 @@ pub trait HashmapType {
     }
 
     fn check_key(bit_len: usize, key: &SliceData) -> bool;
+    fn check_key_fail(bit_len: usize, key: &SliceData) -> Result<()> {
+        match !key.is_empty() && Self::check_key(bit_len, key) {
+            true => Ok(()),
+            false => fail!("Bad key {} for dict", key)
+        }
+    }
     fn make_cell_with_label(key: SliceData, max: usize) -> Result<BuilderData>;
     fn make_cell_with_label_and_data(key: SliceData, max: usize, is_leaf: bool, data: &SliceData) -> Result<BuilderData>;
     fn is_fork(slice: &mut SliceData) -> Result<bool>;
@@ -389,8 +396,9 @@ pub trait HashmapType {
     fn bit_len_mut(&mut self) -> &mut usize;
     fn hashmap_get(&self, mut key: SliceData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
         let mut bit_len = self.bit_len();
+        Self::check_key_fail(bit_len, &key)?;
         let mut cursor = match self.data().cloned() {
-            Some(root) if !key.is_empty() && Self::check_key(bit_len, &key) => gas_consumer.load_cell(root),
+            Some(root) => gas_consumer.load_cell(root),
             _ => return Ok(None)
         };
         let mut label = cursor.get_label(bit_len)?;
@@ -418,9 +426,8 @@ pub trait HashmapType {
         mode: u8
     ) -> Leaf {
         let bit_len = self.bit_len();
-        if key.is_empty() || !T::check_key(bit_len, &key) {
-            Ok(None)
-        } else if let Some(root) = self.data() {
+        T::check_key_fail(bit_len, &key)?;
+        if let Some(root) = self.data() {
             let mut root = root.clone();
             let result = put_to_node_with_mode::<T>(&mut root, bit_len, key, leaf, gas_consumer, mode);
             *self.data_mut() = Some(root);
@@ -574,6 +581,20 @@ pub trait HashmapType {
             _ => fail!("Cannot merge")
         }
         Ok(())
+    }
+    fn scan_diff<F>(&self, other: &Self, mut op: F) -> Result<bool> 
+    where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> {
+        if !self.iterate(&mut |key, value| {
+            let value2 = other.hashmap_get(key.clone(), &mut 0)?;
+            if Some(&value) != value2.as_ref() {
+                return op(key, Some(value), value2)
+            }
+            Ok(true)
+        })? { return Ok(false); }
+        other.iterate(&mut |key, value| match self.hashmap_get(key.clone(), &mut 0)? {
+            None => op(key, None, Some(value)),
+            Some(_) => Ok(true) // already checked in the first loop
+        })
     }
 }
 
@@ -815,8 +836,9 @@ fn remove_fork<T: HashmapType>(
 pub trait HashmapRemover: HashmapType {
     fn hashmap_remove<T: HashmapType>(&mut self, key: SliceData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
         let bit_len = self.bit_len();
+        T::check_key_fail(bit_len, &key)?;
         let mut root = match self.data().cloned() {
-            Some(root) if !key.is_empty() && T::check_key(bit_len, &key) => root,
+            Some(root) => root,
             _ => return Ok(None)
         };
         let mut leaf = gas_consumer.load_cell(root.clone());
