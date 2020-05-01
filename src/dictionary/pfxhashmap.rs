@@ -119,7 +119,7 @@ impl PfxHashmapE {
     pub fn get_prefix_leaf_with_gas(&self, mut key: SliceData, gas_consumer: &mut dyn GasConsumer) -> Result<(SliceData, Option<SliceData>, SliceData)> {
         let mut bit_len = self.bit_len;
         let mut cursor = match self.data().cloned() {
-            Some(root) if !key.is_empty() => gas_consumer.load_cell(root),
+            Some(root) if !key.is_empty() => gas_consumer.load_cell(root)?,
             _ => return Ok((SliceData::default(), None, key))
         };
         let mut path =  BuilderData::default();
@@ -146,7 +146,7 @@ impl PfxHashmapE {
                 return Ok((path.into(), None, key)) // problem
             }
             path.append_bit_bool(next_index == 1)?;
-            cursor = gas_consumer.load_cell(cursor.reference(next_index)?);
+            cursor = gas_consumer.load_cell(cursor.reference(next_index)?)?;
             bit_len -= label.remaining_bits() + 1;
             label = cursor.get_label(bit_len)?;
         }
