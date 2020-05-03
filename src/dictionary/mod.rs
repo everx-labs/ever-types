@@ -208,7 +208,7 @@ fn find_leaf<T: HashmapType>(
     let key_length = key.remaining_bits();
     let mut path = BuilderData::default();
     let mut child = (None, None);
-    let mut cursor = gas_consumer.load_cell(dict.clone());
+    let mut cursor = gas_consumer.load_cell(dict.clone())?;
     let old_cursor = cursor.clone();
     let key_positive = (key.get_bits(0, 1)? & 1) != 1;
     let mut label = cursor.get_label(bit_len)?;
@@ -226,7 +226,7 @@ fn find_leaf<T: HashmapType>(
             child = (Some(path), Some(fork));
         }
         path.append_bit_bool(key_bit == 1)?;
-        cursor = gas_consumer.load_cell(cursor.reference(key_bit)?);
+        cursor = gas_consumer.load_cell(cursor.reference(key_bit)?)?;
         label = cursor.get_label(bit_len - path.length_in_bits())?;
     }
     let key_len = key.remaining_bits();
@@ -239,7 +239,7 @@ fn find_leaf<T: HashmapType>(
     if key_len == label_len && order(&key, &label) { // last branch
         path.checked_append_references_and_data(&label)?;
         // additional load of root cell - to correspond TON code
-        gas_consumer.load_cell(dict.clone());
+        gas_consumer.load_cell(dict.clone())?;
         return Ok((Some(path), Some(cursor)))
     }
     if key_len > label_len {
@@ -260,7 +260,7 @@ fn find_leaf<T: HashmapType>(
         }
     }
     if let (Some(mut path), Some(mut cursor)) = child {
-        // let mut slice = gas_consumer.load_cell(path.clone().into());
+        // let mut slice = gas_consumer.load_cell(path.clone().into())?;
         // let sign = slice.get_next_bit()?;
         assert_ne!(path.length_in_bits(), 0);
         let sign = path.data()[0] & 128 == 128;
@@ -271,13 +271,13 @@ fn find_leaf<T: HashmapType>(
             if signed_int && !key_positive && !sign && !next {
                 break;  // positive path when key negative number
             }
-            let mut slice = gas_consumer.load_cell(cursor.clone());
+            let mut slice = gas_consumer.load_cell(cursor.clone())?;
             let label = slice.get_label(bit_len - path.length_in_bits())?;
             path.checked_append_references_and_data(&label)?;
             if path.length_in_bits() == bit_len {
                 // additional load of root cell - to correspond TON code
-                // gas_consumer.load_cell(dict.clone());
-                // gas_consumer.load_cell(Cell::default());
+                // gas_consumer.load_cell(dict.clone())?;
+                // gas_consumer.load_cell(Cell::default())?;
                 return Ok((Some(path), Some(slice)))
             } else if path.length_in_bits() > bit_len || !T::is_fork(&mut slice)? {
                 break
@@ -293,12 +293,12 @@ fn find_leaf<T: HashmapType>(
 
 pub fn get_min<T: HashmapType>(cell: Option<Cell>, bit_len: usize, max_len: usize, signed: bool, gas_consumer: &mut dyn GasConsumer) -> KeyLeaf {
     if let Some(cell) = cell {
-        let mut root = gas_consumer.load_cell(cell);
+        let mut root = gas_consumer.load_cell(cell)?;
         if signed && root.clone().get_label(bit_len)?.is_empty() {
             if root.remaining_references() < 2 {
                 fail!(ExceptionCode::CellUnderflow)
             }
-            let ref mut fork = gas_consumer.load_cell(root.reference(1)?);
+            let ref mut fork = gas_consumer.load_cell(root.reference(1)?)?;
             if let (Some(path), leaf) = T::down_to_leaf(fork, bit_len - 1, max_len - 1, 0, gas_consumer)? {
                 let mut label = BuilderData::default();
                 label.append_bit_one()?;
@@ -314,12 +314,12 @@ pub fn get_min<T: HashmapType>(cell: Option<Cell>, bit_len: usize, max_len: usiz
 
 pub fn get_max<T: HashmapType>(cell: Option<Cell>, bit_len: usize, max_len: usize, signed: bool, gas_consumer: &mut dyn GasConsumer) -> KeyLeaf {
     if let Some(cell) = cell {
-        let mut root = gas_consumer.load_cell(cell);
+        let mut root = gas_consumer.load_cell(cell)?;
         if signed && root.clone().get_label(bit_len)?.is_empty() {
             if root.remaining_references() < 2 {
                 fail!(ExceptionCode::CellUnderflow)
             }
-            let ref mut fork = gas_consumer.load_cell(root.reference(0)?);
+            let ref mut fork = gas_consumer.load_cell(root.reference(0)?)?;
             if let (Some(path), leaf) = T::down_to_leaf(fork, bit_len - 1, max_len - 1, 1, gas_consumer)? {
                 let mut label = BuilderData::default();
                 label.append_bit_zero()?;
@@ -371,14 +371,14 @@ pub trait HashmapType {
         if Self::is_fork(cursor)? && max_len > label_length {
             bit_len -= label_length + 1;
             max_len -= label_length + 1;
-            let ref mut fork = gas_consumer.load_cell(cursor.reference(next_index)?);
+            let ref mut fork = gas_consumer.load_cell(cursor.reference(next_index)?)?;
             if let (Some(path), leaf) = Self::down_to_leaf(fork, bit_len, max_len, next_index, gas_consumer)? {
                 let mut label = BuilderData::from_slice(&label);
                 label.append_bit_bool(next_index == 1)?;
                 label.append_builder(&path)?;
                 return Ok((Some(label), leaf))
             }
-            let ref mut fork = gas_consumer.load_cell(cursor.reference(1 - next_index)?);
+            let ref mut fork = gas_consumer.load_cell(cursor.reference(1 - next_index)?)?;
             if let (Some(path), leaf) = Self::down_to_leaf(fork, bit_len, max_len, next_index, gas_consumer)? {
                 let mut label = BuilderData::from_slice(&label);
                 label.append_bit_bool(next_index == 0)?;
@@ -398,7 +398,7 @@ pub trait HashmapType {
         let mut bit_len = self.bit_len();
         Self::check_key_fail(bit_len, &key)?;
         let mut cursor = match self.data().cloned() {
-            Some(root) => gas_consumer.load_cell(root),
+            Some(root) => gas_consumer.load_cell(root)?,
             _ => return Ok(None)
         };
         let mut label = cursor.get_label(bit_len)?;
@@ -407,7 +407,7 @@ pub trait HashmapType {
                 return Ok(None)
             }
             let next_index = key.get_next_bit_int()?;
-            cursor = gas_consumer.load_cell(cursor.reference(next_index)?);
+            cursor = gas_consumer.load_cell(cursor.reference(next_index)?)?;
             bit_len -= label.remaining_bits() + 1;
             label = cursor.get_label(bit_len)?;
         }
@@ -433,7 +433,7 @@ pub trait HashmapType {
             *self.data_mut() = Some(root);
             result
         } else if mode.bit(ADD) {
-            let cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(key, bit_len, true, leaf)?);
+            let cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(key, bit_len, true, leaf)?)?;
             *self.data_mut() = Some(cell);
             Ok(None)
         } else {
@@ -671,14 +671,14 @@ fn put_to_node_with_mode<T: HashmapType>(
     mode: u8
 ) -> Leaf {
     let mut result = Ok(None);
-    let mut slice = gas_consumer.load_cell(cell.clone());
+    let mut slice = gas_consumer.load_cell(cell.clone())?;
     let label = slice.get_label(bit_len)?;
     if label == key {
         // replace existing leaf
         if T::is_leaf(&mut slice) {
             result = Ok(Some(slice));
             if mode.bit(REPLACE) {
-                *cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(key, bit_len, true, leaf)?);
+                *cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(key, bit_len, true, leaf)?)?;
             }
         } else {
             fail!(ExceptionCode::FatalError)
@@ -689,12 +689,12 @@ fn put_to_node_with_mode<T: HashmapType>(
         match put_to_fork_with_mode::<T>(&mut slice, bit_len, key, leaf, gas_consumer, mode)? {
             None => {
                 if mode.bit(ADD) {
-                    *cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(label, bit_len, is_leaf, &slice)?);
+                    *cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(label, bit_len, is_leaf, &slice)?)?;
                 }
             }
             Some(val) => {
                 if mode.bit(REPLACE) {
-                    *cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(label, bit_len, is_leaf, &slice)?);
+                    *cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(label, bit_len, is_leaf, &slice)?)?;
                 }
                 result = Ok(Some(val));
             }
@@ -704,7 +704,7 @@ fn put_to_node_with_mode<T: HashmapType>(
             (_, _, None) => {// variable length: key shorter than edge
                 if mode.bit(ADD) {
                     let is_leaf = T::is_leaf(&mut slice);
-                    *cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(label, bit_len, is_leaf, &slice)?);
+                    *cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(label, bit_len, is_leaf, &slice)?)?;
                 }
             }
             (label_prefix, Some(label_remainder), Some(key_remainder)) => {
@@ -714,7 +714,7 @@ fn put_to_node_with_mode<T: HashmapType>(
                         label_prefix.unwrap_or_default(), label_remainder, key_remainder,
                         leaf, gas_consumer
                     )?;
-                    *cell = gas_consumer.finalize_cell(b);
+                    *cell = gas_consumer.finalize_cell(b)?;
                 }
             }
             (Some(prefix), None, Some(key_remainder)) => {
@@ -731,7 +731,7 @@ fn put_to_node_with_mode<T: HashmapType>(
                 if make_cell {
                     *cell = gas_consumer.finalize_cell(
                         T::make_cell_with_label_and_data(label, bit_len, is_leaf, &slice)?
-                    );
+                    )?;
                 }
             }
             error @ (_, _, _) => {
@@ -765,9 +765,9 @@ fn slice_edge<T: HashmapType>(
     // Common prefix
     let mut builder = T::make_cell_with_label(prefix, bit_len)?;
     // Remainder of tree
-    let existing_cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(label, length, is_leaf, &slice)?);
+    let existing_cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(label, length, is_leaf, &slice)?)?;
     // Leaf for fork
-    let another_cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(key, length, true, leaf)?);
+    let another_cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(key, length, true, leaf)?)?;
     if !label_bit {
         builder.append_reference_cell(existing_cell);
         builder.append_reference_cell(another_cell);
@@ -792,18 +792,18 @@ fn remove_node<T: HashmapType>(
     }
     let length = bit_len - 1 - prefix.remaining_bits();
     let next_index = key.get_next_bit_int()?;
-    let mut leaf = gas_consumer.load_cell(cell.reference(next_index)?);
+    let mut leaf = gas_consumer.load_cell(cell.reference(next_index)?)?;
     let label = leaf.get_label(length)?;
     if label == key && T::is_leaf(&mut leaf) {
         let result = Some(leaf);
-        let ref mut fork = gas_consumer.load_cell(cell.reference(1 - next_index)?);
+        let ref mut fork = gas_consumer.load_cell(cell.reference(1 - next_index)?)?;
         let mut label = BuilderData::from_slice(&prefix);
         label.append_bit_bool(next_index == 0)?;
         label.checked_append_references_and_data(&fork.get_label(length)?)?; // with fork bit
         let is_leaf = T::is_leaf(fork);
         *cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(
             label.into(), bit_len, is_leaf, fork
-        )?);
+        )?)?;
         return Ok(result);
     }
     let mut references = vec![cell.reference(0)?.clone(), cell.reference(1)?.clone()];
@@ -814,7 +814,7 @@ fn remove_node<T: HashmapType>(
     for r in references {
         builder.append_reference_cell(r);
     }
-    *cell = gas_consumer.finalize_cell(builder);
+    *cell = gas_consumer.finalize_cell(builder)?;
 
     result
 }
@@ -841,7 +841,7 @@ pub trait HashmapRemover: HashmapType {
             Some(root) => root,
             _ => return Ok(None)
         };
-        let mut leaf = gas_consumer.load_cell(root.clone());
+        let mut leaf = gas_consumer.load_cell(root.clone())?;
         let label = leaf.get_label(bit_len)?;
         let result;
         *self.data_mut() = if label == key && T::is_leaf(&mut leaf) {
@@ -861,7 +861,7 @@ fn remove_except_prefix<T: HashmapType>(cell: &mut Cell, bit_len: usize, prev_co
 
     let next_index = prefix.get_next_bit_int()?;
     let mut next = match cell.references_count() >= next_index {
-        true => gas_consumer.load_cell(cell.reference(next_index)?),
+        true => gas_consumer.load_cell(cell.reference(next_index)?)?,
         false => return Ok(false)
     };
     let length = bit_len - prev_common.remaining_bits() - 1;
@@ -877,7 +877,7 @@ fn remove_except_prefix<T: HashmapType>(cell: &mut Cell, bit_len: usize, prev_co
         rem_label.map(|ref string| label.append_bytestring(string)).transpose()?;
         let label: SliceData = label.into();
         let is_leaf = T::is_leaf(&mut next);
-        *cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(label.clone(), bit_len, is_leaf, &next)?);
+        *cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(label.clone(), bit_len, is_leaf, &next)?)?;
         if let Some(rem_prefix) = rem_prefix {
             return remove_except_prefix::<T>(cell, bit_len, label, rem_prefix, gas_consumer);
         }
@@ -888,7 +888,7 @@ fn remove_except_prefix<T: HashmapType>(cell: &mut Cell, bit_len: usize, prev_co
 fn remove_with_prefix<T: HashmapType>(cell: &mut Cell, bit_len: usize, prev_common: SliceData, mut prefix: SliceData, gas_consumer: &mut dyn GasConsumer) -> Result<bool> {
     let next_index = prefix.get_next_bit_int()?;
     let mut next = match cell.references_count() >= next_index {
-        true => gas_consumer.load_cell(cell.reference(next_index)?),
+        true => gas_consumer.load_cell(cell.reference(next_index)?)?,
         false => return Ok(false)
     };
     let length = bit_len - prev_common.remaining_bits() - 1;
@@ -899,7 +899,7 @@ fn remove_with_prefix<T: HashmapType>(cell: &mut Cell, bit_len: usize, prev_comm
     } else {
         let label = rem_label.unwrap_or_default();
         let is_leaf = T::is_leaf(&mut next);
-        *cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(label.clone(), length, is_leaf, &next)?);
+        *cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(label.clone(), length, is_leaf, &next)?)?;
         if let Some(rem_prefix) = rem_prefix {
             return remove_with_prefix::<T>(cell, length, label, rem_prefix, gas_consumer);
         }
@@ -912,7 +912,7 @@ fn hashmap_into_subtree_with_prefix<T: HashmapType>(tree: &mut T, prefix: SliceD
     debug_assert!(bit_len >= prefix.remaining_bits());
     if !prefix.is_empty() && !tree.is_empty() && bit_len >= prefix.remaining_bits() {
         if let Some(mut root) = tree.data().cloned() {
-            let mut slice = gas_consumer.load_cell(root.clone());
+            let mut slice = gas_consumer.load_cell(root.clone())?;
             let label = slice.get_label(bit_len)?;
             let (common, rem_label, rem_prefix) = SliceData::common_prefix(&label, &prefix);
             *tree.data_mut() = if !label.is_empty() && (common.is_none() || (rem_label.is_some() && rem_prefix.is_some())) {
@@ -936,7 +936,7 @@ fn hashmap_into_subtree_without_prefix<T: HashmapType>(tree: &mut T, prefix: Sli
     debug_assert!(bit_len >= prefix.remaining_bits());
     if !prefix.is_empty() && !tree.is_empty() && bit_len >= prefix.remaining_bits() {
         if let Some(mut root) = tree.data().cloned() {
-            let mut slice = gas_consumer.load_cell(root.clone());
+            let mut slice = gas_consumer.load_cell(root.clone())?;
             let label = slice.get_label(bit_len)?;
             let (common, rem_label, rem_prefix) = SliceData::common_prefix(&label, &prefix);
             *tree.data_mut() = if !label.is_empty() && (common.is_none() || (rem_label.is_some() && rem_prefix.is_some())) {
@@ -954,7 +954,7 @@ fn hashmap_into_subtree_without_prefix<T: HashmapType>(tree: &mut T, prefix: Sli
                     rem_label.unwrap_or_default(),
                     bit_len - prefix.remaining_bits(),
                     is_leaf, &slice
-                )?);
+                )?)?;
                 *tree.bit_len_mut() = bit_len - prefix.remaining_bits();
                 Some(root)
             }
