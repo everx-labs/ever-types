@@ -321,6 +321,7 @@ pipeline {
             steps {
                 sshagent([G_gitcred]) {
                     script {
+                        sh "git fetch && git pull"
                         G_giturl = env.GIT_URL
                         G_commit = GIT_COMMIT
                         echo "${G_giturl}"
