@@ -87,7 +87,7 @@ def buildBranchesMap() {
         G_branches.put('ton-labs-types', "${env.BRANCH_NAME}")
     } else {
         G_branches.put('ton-labs-types', params.branch_ton_labs_types)
-    }sdkbinaries-ws.tonlabs.io
+    }
 
     if (params.branch_ton_block == '') {
         G_branches.put('ton-block', "master")
