@@ -77,6 +77,18 @@ impl From<[u8;32]> for UInt256 {
     }
 }
 
+impl Into<[u8;32]> for UInt256 {
+    fn into(self) -> [u8; 32] {
+        self.0
+    }
+}
+
+impl<'a> Into<&'a [u8;32]> for &'a UInt256 {
+    fn into(self) -> &'a [u8; 32] {
+        &self.0
+    }
+}
+
 impl<'a> From<&'a [u8;32]> for UInt256 {
     fn from(data: &[u8;32]) -> Self {
         UInt256(data.clone())
