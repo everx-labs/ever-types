@@ -417,6 +417,13 @@ impl Cell {
     }
 }
 
+impl Cell {
+    pub fn read_from_file(file_name: &str) -> Self {
+        let bytes = std::fs::read(file_name).unwrap();
+        crate::cells_serialization::deserialize_tree_of_cells(&mut std::io::Cursor::new(bytes)).unwrap()
+    }
+}
+
 impl Default for Cell {
     fn default() -> Self{
         Cell(Arc::new(DataCell::new()))
