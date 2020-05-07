@@ -333,9 +333,8 @@ pub fn get_max<T: HashmapType>(cell: Option<Cell>, bit_len: usize, max_len: usiz
     }
 }
 
-
 // difference for different hashmap types
-pub trait HashmapType: Sized {
+pub trait HashmapType {
     fn write_hashmap_data(&self, cell: &mut BuilderData) -> Result<()> {
         if let Some(root) = self.data() {
             cell.append_bit_one()?;
@@ -455,9 +454,10 @@ pub trait HashmapType: Sized {
     }
 
     /// iterate all elements with callback function
-    /// to be removed
     fn iterate<F> (&self, p: &mut F) -> Result<bool>
-    where F: FnMut(SliceData, SliceData) -> Result<bool> {
+    where 
+        F: FnMut(SliceData, SliceData) -> Result<bool> 
+    {
         if let Some(root) = self.data() {
             iterate_internal(
                 &mut SliceData::from(root),
@@ -469,36 +469,36 @@ pub trait HashmapType: Sized {
         }
     }
 
-    /// iterate all elements with callback function
-    fn iterate_slices<F> (&self, mut p: F) -> Result<bool>
-    where F: FnMut(SliceData, SliceData) -> Result<bool> {
+    /// returns count of items
+    fn len(&self) -> Result<usize> {
+        let mut count = 0;
         if let Some(root) = self.data() {
             iterate_internal(
                 &mut SliceData::from(root),
                 BuilderData::default(),
                 self.bit_len(),
-                &mut p)
-        } else {
-            Ok(true)
+                &mut |_,_| {
+                    count += 1;
+                    Ok(true)
+                }
+            )?;
         }
-    }
-
-    /// returns count of objects in tree - don't use it - try is_empty()
-    fn len(&self) -> Result<usize> {
-        let mut count = 0;
-        self.iterate_slices(|_, _| {
-            count += 1;
-            Ok(true)
-        })?;
         Ok(count)
     }
-    /// counts elements to max counter - can be used as validate
+    // counts elements to max counter - can be used as validate
     fn count(&self, max: usize) -> Result<usize> {
         let mut count = 0;
-        self.iterate_slices(|_, _| {
-            count += 1;
-            Ok(count < max)
-        })?;
+        if let Some(root) = self.data() {
+            iterate_internal(
+                &mut SliceData::from(root),
+                BuilderData::default(),
+                self.bit_len(),
+                &mut |_,_| {
+                    count += 1;
+                    Ok(count < max)
+                }
+            )?;
+        }
         Ok(count)
     }
     // split
@@ -584,31 +584,30 @@ pub trait HashmapType: Sized {
     }
     fn scan_diff<F>(&self, other: &Self, mut op: F) -> Result<bool> 
     where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> {
-        if !self.iterate_slices(|key, value| {
+        if !self.iterate(&mut |key, value| {
             let value2 = other.hashmap_get(key.clone(), &mut 0)?;
             if Some(&value) != value2.as_ref() {
                 return op(key, Some(value), value2)
             }
             Ok(true)
         })? { return Ok(false); }
-        other.iterate_slices(|key, value| match self.hashmap_get(key.clone(), &mut 0)? {
+        other.iterate(&mut |key, value| match self.hashmap_get(key.clone(), &mut 0)? {
             None => op(key, None, Some(value)),
             Some(_) => Ok(true) // already checked in the first loop
         })
     }
 }
 
-pub trait HashmapIter {
-    
-}
-
 /// iterate all elements with callback function
-fn iterate_internal<F: FnMut(SliceData, SliceData) -> Result<bool>>(
+fn iterate_internal<F>(
     cursor: &mut SliceData, 
     mut key: BuilderData, 
     mut bit_len: usize, 
     found: &mut F
-) -> Result<bool> {
+) -> Result<bool>
+where 
+    F: FnMut(SliceData, SliceData) -> Result<bool> 
+{
     let label = cursor.get_label(bit_len)?;
     let label_length = label.remaining_bits();
     debug_assert!(label_length <= bit_len, "label_length: {}, bit_len: {}", label_length, bit_len);
