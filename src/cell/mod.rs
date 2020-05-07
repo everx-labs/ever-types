@@ -417,6 +417,13 @@ impl Cell {
     }
 }
 
+impl Cell {
+    pub fn read_from_file(file_name: &str) -> Self {
+        let bytes = std::fs::read(file_name).unwrap();
+        crate::cells_serialization::deserialize_tree_of_cells(&mut std::io::Cursor::new(bytes)).unwrap()
+    }
+}
+
 impl Default for Cell {
     fn default() -> Self{
         Cell(Arc::new(DataCell::new()))
@@ -511,14 +518,14 @@ pub struct CellData {
     cell_type: CellType,
     data: Vec<u8>,
     bit_length: u16,
-    level: u8,
+    level_mask: LevelMask,
     store_hashes: bool,
     hashes: Option<Vec<UInt256>>,
     depths: Option<Vec<u16>>,
 }
 
 impl CellData {
-    pub fn with_params(cell_type: CellType, data: Vec<u8>, level: u8, store_hashes: bool, hashes: Option<Vec<UInt256>>, depths: Option<Vec<u16>>) -> Self {
+    pub fn with_params(cell_type: CellType, data: Vec<u8>, level_mask: u8, store_hashes: bool, hashes: Option<Vec<UInt256>>, depths: Option<Vec<u16>>) -> Self {
         let bit_length = find_tag(&data);
         assert!(bit_length < 1024);
         let bit_length = bit_length as u16;
@@ -526,7 +533,7 @@ impl CellData {
             cell_type,
             data,
             bit_length,
-            level,
+            level_mask: LevelMask::with_mask(level_mask),
             store_hashes,
             hashes,
             depths,
@@ -546,11 +553,11 @@ impl CellData {
     }
 
     pub fn level(&self) -> u8 {
-        self.level
+        self.level_mask.level()
     }
 
     pub fn level_mask(&self) -> LevelMask {
-        LevelMask::with_level(self.level)
+        self.level_mask
     }
 
     pub fn store_hashes(&self) -> bool {
@@ -574,7 +581,7 @@ impl CellData {
     }
 
     pub fn hash(&self, mut index: usize) -> UInt256 {
-        index = self.level_mask().calc_hash_index(index);
+        index = self.level_mask.calc_hash_index(index);
         if self.cell_type() == CellType::PrunedBranch {
             // pruned cell stores all hashes (except representetion) in data
             if index != self.level() as usize {
@@ -594,7 +601,7 @@ impl CellData {
     }
 
     pub fn depth(&self, mut index: usize) -> u16 {
-        index = self.level_mask().calc_hash_index(index);
+        index = self.level_mask.calc_hash_index(index);
         if self.cell_type() == CellType::PrunedBranch {
             // pruned cell stores all depth except "representetion" in data
             if index != self.level() as usize {
@@ -623,7 +630,7 @@ impl CellData {
         writer.write(&[self.cell_type.to_u8().unwrap()])?;
         writer.write(&self.bit_length.to_le_bytes())?;
         writer.write(&self.data[0..(self.bit_length as usize + 8) / 8])?;
-        writer.write(&[self.level])?;
+        writer.write(&[self.level_mask.0])?;
         writer.write(&[if self.store_hashes { 1 } else { 0 }])?;
         if let Some(ref hashes) = self.hashes {
             writer.write(&[1])?;
@@ -654,14 +661,14 @@ impl CellData {
         let data_len = ((bit_length + 8) / 8) as usize;
         let mut data: Vec<u8> = vec![0; data_len];
         reader.read_exact(&mut data)?;
-        let level = reader.read_byte()?;
+        let level_mask = reader.read_byte()?;
         let store_hashes = Self::read_bool(reader)?;
         let hashes = Self::read_short_vector_opt(reader,
                                                  |reader| Ok(UInt256::from(reader.read_u256()?)))?;
         let depths = Self::read_short_vector_opt(reader,
                                                  |reader| Ok(reader.read_le_u16()?))?;
 
-        Ok(Self::with_params(cell_type, data, level, store_hashes, hashes, depths))
+        Ok(Self::with_params(cell_type, data, level_mask, store_hashes, hashes, depths))
     }
 
     fn read_short_vector_opt<R, T, F>(reader: &mut R, read_func: F) -> std::io::Result<Option<Vec<T>>>
@@ -722,9 +729,8 @@ impl DataCell {
         let mut references: Vec<Cell> = vec![];
         references.extend(refs);
         let store_hashes = hashes.is_some();
-        let level = LevelMask::with_mask(level_mask).level();
         let mut cell = DataCell {
-            cell_data: CellData::with_params(cell_type, data, level, store_hashes, hashes, depths),
+            cell_data: CellData::with_params(cell_type, data, level_mask, store_hashes, hashes, depths),
             references,
         };
         cell.finalize(true)?;
@@ -750,7 +756,7 @@ impl DataCell {
                     fail!(ExceptionCode::RangeCheckError)
                 }
                 if self.data()[0] != u8::from(CellType::PrunedBranch) ||
-                   self.data()[1] != self.level_mask().mask() {
+                   self.data()[1] != self.cell_data.level_mask.0 {
                     fail!(ExceptionCode::FatalError)
                 }
             },
@@ -795,7 +801,7 @@ impl DataCell {
             CellType::MerkleUpdate => LevelMask::for_merkle_cell(children_mask),
             CellType::Unknown => fail!(ExceptionCode::RangeCheckError)
         };
-        if self.level_mask() != level_mask {
+        if self.cell_data.level_mask != level_mask {
             fail!(ExceptionCode::RangeCheckError)
         }
 

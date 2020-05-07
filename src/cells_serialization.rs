@@ -22,6 +22,7 @@ use crc::{crc32, Hasher32};
 use crate::cell::{Cell, CellType, DataCell, LevelMask};
 use crate::types::ByteOrderRead;
 use crate::types::UInt256;
+use crate::{Result, fail};
 
 
 pub const SHA256_SIZE: usize = 32;
@@ -120,7 +121,7 @@ impl BagOfCells {
         None
     }
     
-    pub fn write_to<T: Write>(&self, dest: &mut T, include_index: bool) -> std::io::Result<()> {
+    pub fn write_to<T: Write>(&self, dest: &mut T, include_index: bool) -> Result<()> {
         self.write_to_ex(
             dest,
             BocSerialiseMode::Generic{
@@ -133,7 +134,7 @@ impl BagOfCells {
     }
 
     pub fn write_to_ex<T: Write>(&self, dest: &mut T, mode: BocSerialiseMode,
-        custom_ref_size: Option<usize>, custom_offset_size: Option<usize>) -> std::io::Result<()> {
+        custom_ref_size: Option<usize>, custom_offset_size: Option<usize>) -> Result<()> {
         
         let dest = &mut IoCrcFilter::new(dest);
 
@@ -285,7 +286,7 @@ impl BagOfCells {
         }
     }
 
-    fn serialize_absent_cell(cell: &Cell, write: &mut dyn Write) -> std::io::Result<()> {
+    fn serialize_absent_cell(cell: &Cell, write: &mut dyn Write) -> Result<()> {
         
         // For absent cells (i.e., external references), only d1 is present, always equal to 23 + 32l.
         let l = cell.level();
@@ -297,7 +298,7 @@ impl BagOfCells {
     }
 
     /// Serialize ordinary cell data
-    pub fn serialize_ordinary_cell_data(cell: &Cell, write: &mut dyn Write) -> std::io::Result<()> {
+    pub fn serialize_ordinary_cell_data(cell: &Cell, write: &mut dyn Write) -> Result<()> {
         let data_bit_len = cell.bit_length();
 
         // descriptor bytes
@@ -372,35 +373,31 @@ struct RawCell {
     pub depths: Option<Vec<u16>>,
 }
 
-fn fail(error: String) -> std::io::Error {
-    std::io::Error::new(std::io::ErrorKind::InvalidInput, error)
-}
-
-pub fn deserialize_tree_of_cells<T: Read>(src: &mut T) -> std::io::Result<Cell> {
+pub fn deserialize_tree_of_cells<T: Read>(src: &mut T) -> Result<Cell> {
     let mut cells = deserialize_cells_tree_ex(src).map(|(v, _, _, _)| v)?;
     match cells.len() {
-        0 => Err(fail(format!("Error parsing cells tree: empty root"))),
+        0 => fail!("Error parsing cells tree: empty root"),
         1 => Ok(cells.remove(0)),
-        _ => Err(fail(format!("Error parsing cells tree: too many roots")))
+        _ => fail!("Error parsing cells tree: too many roots")
     }
 }
 
-pub fn serialize_tree_of_cells<T: Write>(cell: &Cell, dst: &mut T) -> std::io::Result<()> {
+pub fn serialize_tree_of_cells<T: Write>(cell: &Cell, dst: &mut T) -> Result<()> {
     BagOfCells::with_root(cell).write_to(dst, false)
 }
 
-pub fn serialize_toc(cell: &Cell) -> std::io::Result<Vec<u8>> {
+pub fn serialize_toc(cell: &Cell) -> Result<Vec<u8>> {
     let mut dst = vec![];
     BagOfCells::with_root(cell).write_to(&mut dst, false).map(|_| dst)
 }
 
 // Absent cells is deserialized into cell with hash. Caller have to know about the cells and process it by itself.
 // Returns vector with root cells
-pub fn deserialize_cells_tree<T>(src: &mut T) -> std::io::Result<Vec<Cell>> where T: Read {
+pub fn deserialize_cells_tree<T>(src: &mut T) -> Result<Vec<Cell>> where T: Read {
     deserialize_cells_tree_ex(src).map(|(v, _, _, _)| v)
 }
 
-pub fn deserialize_cells_tree_ex<T>(src: &mut T) -> std::io::Result<(Vec<Cell>, BocSerialiseMode, usize, usize)>
+pub fn deserialize_cells_tree_ex<T>(src: &mut T) -> Result<(Vec<Cell>, BocSerialiseMode, usize, usize)>
     where T: Read {
         
     let mut src = IoCrcFilter::new(src);
@@ -439,16 +436,16 @@ pub fn deserialize_cells_tree_ex<T>(src: &mut T) -> std::io::Result<(Vec<Cell>, 
                 flags: _flags,
             };
         },
-        _ => return Err(fail(format!("unknown BOC_TAG: {}", magic)))
+        _ => fail!("unknown BOC_TAG: {}", magic)
     };
 
     if ref_size == 0 || ref_size > 4 {
-        return Err(fail(format!("ref size has to be more than 0 and less or equal 4, actual value: {}", ref_size)))
+        fail!("ref size has to be more than 0 and less or equal 4, actual value: {}", ref_size)
     }
 
     let offset_size = src.read_byte()? as usize;
     if offset_size == 0 || offset_size > 8 {
-        return Err(fail(format!("offset size has to be  less or equal 8, actual value: {}", offset_size)))
+        fail!("offset size has to be  less or equal 8, actual value: {}", offset_size)
     }
 
     let cells_count = src.read_be_uint(ref_size)?; // cells:(##(size * 8))
@@ -456,10 +453,10 @@ pub fn deserialize_cells_tree_ex<T>(src: &mut T) -> std::io::Result<(Vec<Cell>, 
     let _absent_count = src.read_be_uint(ref_size)?; // absent:(##(size * 8)) { roots + absent <= cells }
 
     if (magic == BOC_INDEXED_TAG || magic == BOC_INDEXED_CRC32_TAG) && roots_count > 1 {
-        return Err(fail(format!("roots count has to be less or equal 1 for TAG: {}, value: {}", magic, offset_size)))
+        fail!("roots count has to be less or equal 1 for TAG: {}, value: {}", magic, offset_size)
     }
     if roots_count > cells_count {
-        return Err(fail(format!("roots count has to be less or equal than cells count, roots: {}, cells: {}", roots_count, cells_count)))
+        fail!("roots count has to be less or equal than cells count, roots: {}, cells: {}", roots_count, cells_count)
     }
 
     let _tot_cells_size = src.read_be_uint(offset_size); // tot_cells_size:(##(off_bytes * 8))
@@ -487,7 +484,7 @@ pub fn deserialize_cells_tree_ex<T>(src: &mut T) -> std::io::Result<(Vec<Cell>, 
                 offset = offset >> 1;	
             } 
             if prev_offset > offset {
-                return Err(fail(format!("cell[{}]'s offset is wrong", i)))
+                fail!("cell[{}]'s offset is wrong", i)
             }
             cells_sizes[i as usize] = (offset - prev_offset) as usize;
             prev_offset = offset;
@@ -514,11 +511,11 @@ pub fn deserialize_cells_tree_ex<T>(src: &mut T) -> std::io::Result<(Vec<Cell>, 
             if let Some(child) = done_cells.get(&ref_cell_index) {
                 refs.push(child.clone())
             } else {
-                return Err(fail(format!("unresolved reference")))
+                fail!("unresolved reference")
             }
         }
         let cell = DataCell::with_params(refs, raw_cell.data, raw_cell.cell_type, raw_cell.level, 
-            raw_cell.hashes, raw_cell.depths).map_err(|err| fail(err.to_string()))?;
+            raw_cell.hashes, raw_cell.depths)?;
 
         done_cells.insert(cell_index as u32, Cell::with_cell_impl(cell));
     }
@@ -532,7 +529,7 @@ pub fn deserialize_cells_tree_ex<T>(src: &mut T) -> std::io::Result<(Vec<Cell>, 
         let crc = src.sum32();
         let read_crc = src.read_le_u32()?;
         if read_crc != crc {
-            return Err(fail(format!("crc not the same, values: {}, {}", read_crc, crc)))
+            fail!("crc not the same, values: {}, {}", read_crc, crc)
         }
     }
 
@@ -544,7 +541,7 @@ Deserialization separately data and referensed cells indexes.
 Returns cell data, their refs (as indexes), and total read data size.
 */
 fn deserialize_cell<T>(src: &mut T, ref_size: usize, cell_index: usize, cells_count: usize, 
-    cell_size_opt: Option<usize>) -> std::io::Result<RawCell> where T: Read {
+    cell_size_opt: Option<usize>) -> Result<RawCell> where T: Read {
 
     let d1 = src.read_byte()? as usize;
     let l = (d1 >> 5) as u8; // level // TODO not foget about level mask
@@ -574,7 +571,7 @@ fn deserialize_cell<T>(src: &mut T, ref_size: usize, cell_index: usize, cells_co
     }
     
     if r > 4 {
-        return Err(fail(format!("refs count has to be less or equal 4, actual value: {}", r)))
+        fail!("refs count has to be less or equal 4, actual value: {}", r)
     }
 
     let d2 = src.read_byte()?;
@@ -585,7 +582,7 @@ fn deserialize_cell<T>(src: &mut T, ref_size: usize, cell_index: usize, cells_co
     
     if let Some(cell_size) = cell_size_opt {
         if full_cell_size != cell_size {
-            return Err(fail(format!("cell sizes have to be same, expected: {}, real: {}", full_cell_size, cell_size)))
+            fail!("cell sizes have to be same, expected: {}, real: {}", full_cell_size, cell_size)
         }
     }
     
@@ -622,7 +619,7 @@ fn deserialize_cell<T>(src: &mut T, ref_size: usize, cell_index: usize, cells_co
         for _ in 0..r {
             let i = src.read_be_uint(ref_size)?;
             if i > cells_count || i <= cell_index {
-                return Err(fail(format!("reference out of range, {} < (value: {}) <= {}", cells_count, i, cell_index)))
+                fail!("reference out of range, {} < (value: {}) <= {}", cells_count, i, cell_index)
             } else {
                 references.push(i as u32);
             }
