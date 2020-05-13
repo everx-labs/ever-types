@@ -598,10 +598,6 @@ pub trait HashmapType: Sized {
     }
 }
 
-pub trait HashmapIter {
-    
-}
-
 /// iterate all elements with callback function
 fn iterate_internal<F: FnMut(SliceData, SliceData) -> Result<bool>>(
     cursor: &mut SliceData, 

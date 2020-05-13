@@ -51,6 +51,15 @@ macro_rules! fail {
 #[derive(Clone, Default, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct UInt256([u8; 32]);
 
+impl PartialEq<SliceData> for UInt256 {
+    fn eq(&self, other: &SliceData) -> bool {
+        if other.remaining_bits() == 256 {
+            return &self.0 == other.get_bytestring(0).as_slice()
+        }
+        return false
+    }
+}
+
 impl UInt256 {
     pub fn is_zero(&self) -> bool {
         for b in &self.0 {
