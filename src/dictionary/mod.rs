@@ -101,7 +101,7 @@ pub fn hm_label(key: &SliceData, max: usize) -> Result<BuilderData> {
             return Ok(same_label)
         }
     }
-    if short_label.length_in_bits() < long_label.length_in_bits() {
+    if short_label.length_in_bits() <= long_label.length_in_bits() {
         Ok(short_label)
     } else {
         Ok(long_label)
