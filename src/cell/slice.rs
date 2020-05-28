@@ -694,3 +694,9 @@ impl fmt::LowerHex for SliceData {
         write!(f, "{:x}", self.into_cell())
     }
 }
+
+impl fmt::UpperHex for SliceData {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:X}", self.into_cell())
+    }
+}
