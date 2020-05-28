@@ -18,7 +18,7 @@
 edition = "2018"
 build = "build.rs"
 name = "ton_types"
-version = "1.0.0"
+version = "0.23.106"
 
 [dependencies]
 
