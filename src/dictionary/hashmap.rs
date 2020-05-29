@@ -183,7 +183,11 @@ impl HashmapType for HashmapE {
     fn make_cell_with_label_and_data(key: SliceData, max: usize, _is_leaf: bool, data: &SliceData)
     -> Result<BuilderData> {
         let mut builder = hm_label(&key, max)?;
-        builder.checked_append_references_and_data(data)?;
+        // automatically adds reference with data if space is not enought
+        if builder.checked_append_references_and_data(data).is_err() {
+            let reference = BuilderData::from_slice(data);
+            builder.append_reference(reference);
+        }
         Ok(builder)
     }
     fn is_fork(slice: &mut SliceData) -> Result<bool> {
