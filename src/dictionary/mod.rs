@@ -163,23 +163,19 @@ impl SliceData {
     }
 }
 
-fn order_less(a: &SliceData, b: &SliceData) -> bool {
+fn order_less(a: &SliceData, b: &SliceData, signed_int: bool) -> bool {
     match SliceData::common_prefix(a, b) {
-        (_, Some(a), Some(_)) => match a.get_bits(0, 1) {
-            Ok(0) => true,
-            _ => false
-        },
+        (None, Some(a), Some(_)) => (a.get_bits(0, 1).unwrap_or_default() == 0) ^ signed_int,
+        (Some(_), Some(a), Some(_)) => a.get_bits(0, 1).unwrap_or_default() == 0,
         (_, None, Some(_)) => true,
         _ => false
     }
 }
 
-fn order_greater(a: &SliceData, b: &SliceData) -> bool {
+fn order_greater(a: &SliceData, b: &SliceData, signed_int: bool) -> bool {
     match SliceData::common_prefix(a, b) {
-        (_, Some(_), Some(b)) => match b.get_bits(0, 1) {
-            Ok(0) => true,
-            _ => false
-        },
+        (None, Some(_), Some(b)) => (b.get_bits(0, 1).unwrap_or_default() == 0) ^ signed_int,
+        (Some(_), Some(_), Some(b)) => b.get_bits(0, 1).unwrap_or_default() == 0,
         (_, Some(_), None) => true,
         _ => false
     }
@@ -199,10 +195,9 @@ fn find_leaf<T: HashmapType>(
         Some(dict) => dict,
         _ => return Ok((None, None))
     };
-    let (next_index, order): (usize, fn(&SliceData, &SliceData) -> bool) = if next {
-        (0, order_less)
-    } else {
-        (1, order_greater)
+    let (next_index, order): (usize, fn(&SliceData, &SliceData, bool) -> bool) = match next {
+        true => (0, order_less),
+        false => (1, order_greater)
     };
     let key_length = key.remaining_bits();
     let mut path = BuilderData::default();
@@ -211,6 +206,7 @@ fn find_leaf<T: HashmapType>(
     let old_cursor = cursor.clone();
     let key_positive = (key.get_bits(0, 1)? & 1) != 1;
     let mut label = cursor.get_label(bit_len)?;
+    // down from root as possible
     while key.erase_prefix(&label) && !key.is_empty() {
         path.checked_append_references_and_data(&label)?;
         debug_assert!(path.length_in_bits() < key_length);
@@ -235,23 +231,22 @@ fn find_leaf<T: HashmapType>(
         path.checked_append_references_and_data(&label)?;
         return Ok((Some(path), Some(cursor)))
     }
-    if key_len == label_len && order(&key, &label) { // last branch
+    if key_len == label_len && order(&key, &label, signed_int & path.is_empty()) { // last branch
         path.checked_append_references_and_data(&label)?;
-        // additional load of root cell - to correspond TON code
         gas_consumer.load_cell(dict.clone())?;
         return Ok((Some(path), Some(cursor)))
     }
-    if key_len > label_len {
+    if key_len > label_len { // check if last branch is ok by order
         let mut key_trunc = key.clone();
         key_trunc.shrink_data(..label_len);
         key_trunc.shrink_references(..0);
-        if order(&key_trunc, &label) {
+        if order(&key_trunc, &label, signed_int & path.is_empty()) {
             path.checked_append_references_and_data(&label)?;
             path.append_bit_bool(next_index == 1)?;
             child = (Some(path), Some(cursor.reference(next_index)?));
         }
     }
-    if let (None, None) = child {
+    if let (None, None) = child { // if no branches were found and root is branch 
         if signed_int && old_cursor.remaining_references() == 2 {
             let mut path = BuilderData::default();
             path.append_bit_bool(next_index == 1)?;
@@ -259,9 +254,8 @@ fn find_leaf<T: HashmapType>(
         }
     }
     if let (Some(mut path), Some(mut cursor)) = child {
-        // let mut slice = gas_consumer.load_cell(path.clone().into())?;
         // let sign = slice.get_next_bit()?;
-        assert_ne!(path.length_in_bits(), 0);
+        debug_assert_ne!(path.length_in_bits(), 0);
         let sign = path.data()[0] & 128 == 128;
         loop {
             if signed_int && key_positive && sign && next {
@@ -274,9 +268,6 @@ fn find_leaf<T: HashmapType>(
             let label = slice.get_label(bit_len - path.length_in_bits())?;
             path.checked_append_references_and_data(&label)?;
             if path.length_in_bits() == bit_len {
-                // additional load of root cell - to correspond TON code
-                // gas_consumer.load_cell(dict.clone())?;
-                // gas_consumer.load_cell(Cell::default())?;
                 return Ok((Some(path), Some(slice)))
             } else if path.length_in_bits() > bit_len || !T::is_fork(&mut slice)? {
                 break
