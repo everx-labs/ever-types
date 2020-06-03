@@ -316,6 +316,16 @@ impl BuilderData {
     pub fn is_empty(&self) -> bool {
         self.length_in_bits() == 0 && self.references().len() == 0
     }
+
+    pub fn trunc(&mut self, length_in_bits: usize) -> Result<()> {
+        if self.length_in_bits < length_in_bits {
+            fail!(ExceptionCode::FatalError)
+        } else {
+            self.length_in_bits = length_in_bits;
+            self.data.truncate(1 + length_in_bits / 8);
+            Ok(())
+        }
+    }
 }
 
 impl fmt::Display for BuilderData {

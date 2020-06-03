@@ -516,6 +516,7 @@ impl SliceData {
         self.data_window.start
     }
 
+    /// returns false if prefix is not fully in self
     pub fn erase_prefix(&mut self, prefix: &SliceData) -> bool {
         if self.is_empty() || (self.remaining_bits() < prefix.remaining_bits()) {
             false

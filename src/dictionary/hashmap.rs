@@ -13,10 +13,12 @@
 
 use std::fmt;
 
-use crate::types::ExceptionCode;
+use crate::{
+    error, fail, Result, GasConsumer,
+    types::ExceptionCode,
+    cell::{BuilderData, Cell, SliceData},
 
-use super::{HashmapRemover, HashmapType, hm_label, KeyLeaf, Leaf};
-use super::{BuilderData, SliceData};
+};
 use super::*;
 
 ///////////////////////////////////////////////
@@ -131,25 +133,61 @@ impl HashmapE {
         self.hashmap_setref_with_mode::<Self>(key, value, gas_consumer, ADD)
     }
     /// gets next/this or previous leaf
-    pub fn find_leaf(&self, key: SliceData, next: bool, eq: bool, signed_int: bool, gas_consumer: &mut dyn GasConsumer) -> KeyLeaf {
-        find_leaf::<Self>(self.data().cloned(), self.bit_len, key, next, eq, signed_int, gas_consumer)
+    pub fn find_leaf(
+        &self,
+        key: SliceData,
+        next: bool,
+        eq: bool,
+        signed_int: bool,
+        gas_consumer: &mut dyn GasConsumer
+    ) -> Result<Option<(BuilderData, SliceData)>> {
+        Self::check_key_fail(self.bit_len, &key)?;
+        match self.data() {
+            Some(root) => {
+                let mut path = BuilderData::new();
+                let next_index = match next {
+                    true => 0,
+                    false => 1,
+                };
+                let result = find_leaf::<Self>(root.clone(), &mut path, self.bit_len, key, next_index, eq, signed_int, gas_consumer)?;
+                Ok(result.map(|value| (path, value)))
+            }
+            None => Ok(None)
+        }
     }
     /// removes item
     pub fn remove(&mut self, key: SliceData) -> Leaf {
         self.hashmap_remove::<Self>(key, &mut 0)
     }
+    /// removes item spending gas
     pub fn remove_with_gas(&mut self, key: SliceData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
         self.hashmap_remove::<Self>(key, gas_consumer)
     }
     /// gets item with minimal key
-    pub fn get_min(&self, signed: bool, gas_consumer: &mut dyn GasConsumer) -> KeyLeaf {
-        get_min::<Self>(self.data.clone(), self.bit_len, self.bit_len, signed, gas_consumer)
+    pub fn get_min(&self, signed: bool, gas_consumer: &mut dyn GasConsumer) -> Result<Option<(BuilderData, SliceData)>> {
+        self.get_min_max(true, signed, gas_consumer)
     }
-    /// gets item with maximal key
-    pub fn get_max(&self, signed: bool, gas_consumer: &mut dyn GasConsumer) -> KeyLeaf {
-        get_max::<Self>(self.data.clone(), self.bit_len, self.bit_len, signed, gas_consumer)
+    /// gets item with maxiaml key
+    pub fn get_max(&self, signed: bool, gas_consumer: &mut dyn GasConsumer) -> Result<Option<(BuilderData, SliceData)>> {
+        self.get_min_max(false, signed, gas_consumer)
     }
-
+    /// gets item with minimal or maxiaml key
+    pub fn get_min_max(&self, min: bool, signed: bool, gas_consumer: &mut dyn GasConsumer) -> Result<Option<(BuilderData, SliceData)>> {
+        match self.data() {
+            Some(root) => {
+                let mut path = BuilderData::new();
+                let (next_index, index) = match (min, signed) {
+                    (true, true) => (0, 1),
+                    (true, false) => (0, 0),
+                    (false, true) => (1, 0),
+                    (false, false) => (1, 1),
+                };
+                let result = get_min_max::<Self>(root.clone(), &mut path, self.bit_len, next_index, index, gas_consumer)?;
+                Ok(result.map(|value| (path, value)))
+            }
+            None => Ok(None)
+        }
+    }
     /// transform to subtree with the common prefix
     pub fn into_subtree_with_prefix(&mut self, prefix: SliceData, gas_consumer: &mut dyn GasConsumer) -> Result<()> {
         hashmap_into_subtree_with_prefix::<Self>(self, prefix, gas_consumer)

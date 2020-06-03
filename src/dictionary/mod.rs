@@ -25,7 +25,6 @@ pub use self::pfxhashmap::PfxHashmapE;
 mod hashmap;
 mod pfxhashmap;
 
-pub type KeyLeaf = Result<(Option<BuilderData>, Option<SliceData>)>;
 pub type Leaf = Result<Option<SliceData>>;
 
 pub const ADD: u8 = 0x01;
@@ -39,7 +38,7 @@ const SAME_LABEL_PREFIX: u8 = 0b11_000000; // hml_same, binary 11
 fn hml_long(key: &SliceData, len: usize) -> Result<BuilderData> {
     let mut label = BuilderData::with_raw(vec![LONG_LABEL_PREFIX], 2)?;
     label.append_bits(key.remaining_bits(), len)?;
-    label.checked_append_references_and_data(key)?;
+    label.append_bytestring(key)?;
     Ok(label)
 }
 
@@ -55,7 +54,7 @@ fn hml_short(key: &SliceData) -> Result<BuilderData> {
         label.append_bits(std::u32::MAX as usize, remainder)?;
     }
     label.append_bit_zero()?;
-    label.checked_append_references_and_data(key)?;
+    label.append_bytestring(key)?;
     Ok(label)
 }
 
@@ -163,166 +162,93 @@ impl SliceData {
     }
 }
 
-fn order_less(a: &SliceData, b: &SliceData, signed_int: bool) -> bool {
-    match SliceData::common_prefix(a, b) {
-        (None, Some(a), Some(_)) => (a.get_bits(0, 1).unwrap_or_default() == 0) ^ signed_int,
-        (Some(_), Some(a), Some(_)) => a.get_bits(0, 1).unwrap_or_default() == 0,
-        (_, None, Some(_)) => true,
-        _ => false
-    }
-}
-
-fn order_greater(a: &SliceData, b: &SliceData, signed_int: bool) -> bool {
-    match SliceData::common_prefix(a, b) {
-        (None, Some(_), Some(b)) => (b.get_bits(0, 1).unwrap_or_default() == 0) ^ signed_int,
-        (Some(_), Some(_), Some(b)) => b.get_bits(0, 1).unwrap_or_default() == 0,
-        (_, Some(_), None) => true,
-        _ => false
-    }
-}
-
 fn find_leaf<T: HashmapType>(
-    dict: Option<Cell>,
-    bit_len: usize,
+    mut data: Cell,
+    path: &mut BuilderData,
+    mut bit_len: usize,
     mut key: SliceData,
-    next: bool,
+    next_index: usize,
     eq: bool,
     signed_int: bool,
     gas_consumer: &mut dyn GasConsumer
-) -> KeyLeaf {
-    T::check_key_fail(bit_len, &key)?;
-    let dict = match dict {
-        Some(dict) => dict,
-        _ => return Ok((None, None))
-    };
-    let (next_index, order): (usize, fn(&SliceData, &SliceData, bool) -> bool) = match next {
-        true => (0, order_less),
-        false => (1, order_greater)
-    };
-    let key_length = key.remaining_bits();
-    let mut path = BuilderData::default();
-    let mut child = (None, None);
-    let mut cursor = gas_consumer.load_cell(dict.clone())?;
-    let old_cursor = cursor.clone();
-    let key_positive = (key.get_bits(0, 1)? & 1) != 1;
-    let mut label = cursor.get_label(bit_len)?;
-    // down from root as possible
-    while key.erase_prefix(&label) && !key.is_empty() {
-        path.checked_append_references_and_data(&label)?;
-        debug_assert!(path.length_in_bits() < key_length);
-        if !T::is_fork(&mut cursor)? {
-            return Ok((None, None));
-        }
-        let key_bit = key.get_next_bit_int()?;
-        if key_bit == next_index {
-            let fork = cursor.reference(1 - next_index)?;
-            let mut path = path.clone();
-            path.append_bit_bool(next_index == 0)?;
-            child = (Some(path), Some(fork));
-        }
-        path.append_bit_bool(key_bit == 1)?;
-        cursor = gas_consumer.load_cell(cursor.reference(key_bit)?)?;
-        label = cursor.get_label(bit_len - path.length_in_bits())?;
-    }
-    let key_len = key.remaining_bits();
-    let label_len = label.remaining_bits();
-    debug_assert!(key_len == 0 || key_len >= label_len);
-    if key_len == 0 && eq { // the path is the key
-        path.checked_append_references_and_data(&label)?;
-        return Ok((Some(path), Some(cursor)))
-    }
-    if key_len == label_len && order(&key, &label, signed_int & path.is_empty()) { // last branch
-        path.checked_append_references_and_data(&label)?;
-        gas_consumer.load_cell(dict.clone())?;
-        return Ok((Some(path), Some(cursor)))
-    }
-    if key_len > label_len { // check if last branch is ok by order
-        let mut key_trunc = key.clone();
-        key_trunc.shrink_data(..label_len);
-        key_trunc.shrink_references(..0);
-        if order(&key_trunc, &label, signed_int & path.is_empty()) {
-            path.checked_append_references_and_data(&label)?;
-            path.append_bit_bool(next_index == 1)?;
-            child = (Some(path), Some(cursor.reference(next_index)?));
-        }
-    }
-    if let (None, None) = child { // if no branches were found and root is branch 
-        if signed_int && old_cursor.remaining_references() == 2 {
-            let mut path = BuilderData::default();
-            path.append_bit_bool(next_index == 1)?;
-            child = (Some(path), Some(old_cursor.reference(next_index)?));
-        }
-    }
-    if let (Some(mut path), Some(mut cursor)) = child {
-        // let sign = slice.get_next_bit()?;
-        debug_assert_ne!(path.length_in_bits(), 0);
-        let sign = path.data()[0] & 128 == 128;
-        loop {
-            if signed_int && key_positive && sign && next {
-                break;  // negative path when key positive number
-            }
-            if signed_int && !key_positive && !sign && !next {
-                break;  // positive path when key negative number
-            }
-            let mut slice = gas_consumer.load_cell(cursor.clone())?;
-            let label = slice.get_label(bit_len - path.length_in_bits())?;
-            path.checked_append_references_and_data(&label)?;
-            if path.length_in_bits() == bit_len {
-                return Ok((Some(path), Some(slice)))
-            } else if path.length_in_bits() > bit_len || !T::is_fork(&mut slice)? {
-                break
+) -> Result<Option<SliceData>> {
+    let mut cursor = gas_consumer.load_cell(data.clone())?;
+    let label = cursor.get_label(bit_len)?;
+    match SliceData::common_prefix(&key, &label) {
+        (_, None, Some(_)) => fail!(ExceptionCode::DictionaryError),
+        (prefix_opt, Some(remainder), Some(_)) => { // hm_edge is sliced
+            let key_bit = remainder.get_bits(0, 1)? as usize;
+            let next = match signed_int && path.is_empty() && prefix_opt.is_none() {
+                false => next_index,
+                true => 1 - next_index,
+            };
+            dbg!(key_bit, next_index, path.length_in_bits());
+            if key_bit != next {
+                Ok(None)
             } else {
-                // TODO: check next_index && ref.len and can go another fork
-                cursor = slice.reference(next_index)?;
-                path.append_bit_bool(next_index == 1)?;
+                return get_min_max::<T>(data, path, bit_len, next_index, next, gas_consumer)
             }
         }
-    }
-    Ok((None, None))
-}
-
-pub fn get_min<T: HashmapType>(cell: Option<Cell>, bit_len: usize, max_len: usize, signed: bool, gas_consumer: &mut dyn GasConsumer) -> KeyLeaf {
-    if let Some(cell) = cell {
-        let mut root = gas_consumer.load_cell(cell)?;
-        if signed && root.clone().get_label(bit_len)?.is_empty() {
-            if root.remaining_references() < 2 {
-                fail!(ExceptionCode::CellUnderflow)
-            }
-            let ref mut fork = gas_consumer.load_cell(root.reference(1)?)?;
-            if let (Some(path), leaf) = T::down_to_leaf(fork, bit_len - 1, max_len - 1, 0, gas_consumer)? {
-                let mut label = BuilderData::default();
-                label.append_bit_one()?;
-                label.append_builder(&path)?;
-                return Ok((Some(label.into()), leaf))
-            }
+        (_, None, None) => if eq {
+            path.append_bytestring(&label)?;
+            return Ok(Some(cursor))
+        } else {
+            return Ok(None)
         }
-        T::down_to_leaf(&mut root, bit_len, max_len, 0, gas_consumer)
-    } else {
-        Ok((None, None))
-    }
-}
-
-pub fn get_max<T: HashmapType>(cell: Option<Cell>, bit_len: usize, max_len: usize, signed: bool, gas_consumer: &mut dyn GasConsumer) -> KeyLeaf {
-    if let Some(cell) = cell {
-        let mut root = gas_consumer.load_cell(cell)?;
-        if signed && root.clone().get_label(bit_len)?.is_empty() {
-            if root.remaining_references() < 2 {
-                fail!(ExceptionCode::CellUnderflow)
+        (_, Some(remainder), None) => { // label fully in key
+            if !T::is_fork(&mut cursor)? {
+                fail!(ExceptionCode::DictionaryError)
             }
-            let ref mut fork = gas_consumer.load_cell(root.reference(0)?)?;
-            if let (Some(path), leaf) = T::down_to_leaf(fork, bit_len - 1, max_len - 1, 1, gas_consumer)? {
-                let mut label = BuilderData::default();
-                label.append_bit_zero()?;
-                label.append_builder(&path)?;
-                return Ok((Some(label.into()), leaf))
+            let next = match signed_int & path.is_empty() {
+                false => next_index,
+                true => 1 - next_index,
+            };
+            path.append_bytestring(&label)?;
+            key = remainder;
+            let key_bit = key.get_next_bit_int()?;
+            bit_len -= label.remaining_bits() + 1;
+            let length_in_bits = path.length_in_bits();
+            path.append_bit_bool(key_bit == 1)?;
+            let res = find_leaf::<T>(cursor.reference(key_bit)?, path, bit_len, key, next_index, eq, false, gas_consumer)?;
+            if res.is_some() || key_bit != next {
+                dbg!(res.is_some(), key_bit, next, length_in_bits, path.length_in_bits());
+                return Ok(res)
             }
+            path.trunc(length_in_bits)?;
+            path.append_bit_bool(key_bit == 0)?;
+            data = cursor.reference(1 - key_bit)?;
+            return get_min_max::<T>(data, path, bit_len, next_index, next_index, gas_consumer)
         }
-        T::down_to_leaf(&mut root, bit_len, max_len, 1, gas_consumer)
-    } else {
-        Ok((None, None))
     }
 }
 
+/// recursevily searchs min or max element from current subtree. Append path and returns element if found
+pub fn get_min_max<T: HashmapType>(
+    mut data: Cell,
+    path: &mut BuilderData,
+    mut bit_len: usize,
+    next_index: usize, // 0 - for min, 1 - for max
+    mut index: usize,
+    gas_consumer: &mut dyn GasConsumer
+) -> Result<Option<SliceData>> {
+    loop {
+        let mut cursor = gas_consumer.load_cell(data)?;
+        let label = cursor.get_label(bit_len)?;
+        let label_length = label.remaining_bits();
+        if T::is_fork(&mut cursor)? && bit_len > label_length {
+            bit_len -= label_length + 1;
+            path.append_bytestring(&label)?;
+            path.append_bit_bool(index == 1)?;
+            data = cursor.reference(index)?;
+        } else if bit_len == label_length {
+            path.append_bytestring(&label)?;
+            return Ok(Some(cursor))
+        } else {
+            fail!(ExceptionCode::DictionaryError)
+        }
+        index = next_index;
+    }
+}
 
 // difference for different hashmap types
 pub trait HashmapType: Sized {
@@ -355,32 +281,6 @@ pub trait HashmapType: Sized {
     fn make_cell_with_label_and_data(key: SliceData, max: usize, is_leaf: bool, data: &SliceData) -> Result<BuilderData>;
     fn is_fork(slice: &mut SliceData) -> Result<bool>;
     fn is_leaf(slice: &mut SliceData) -> bool;
-    fn down_to_leaf(cursor: &mut SliceData, mut bit_len: usize, mut max_len: usize, next_index: usize, gas_consumer: &mut dyn GasConsumer)
-    -> KeyLeaf {
-        let label = cursor.get_label(bit_len)?;
-        let label_length = label.remaining_bits();
-        if Self::is_fork(cursor)? && max_len > label_length {
-            bit_len -= label_length + 1;
-            max_len -= label_length + 1;
-            let ref mut fork = gas_consumer.load_cell(cursor.reference(next_index)?)?;
-            if let (Some(path), leaf) = Self::down_to_leaf(fork, bit_len, max_len, next_index, gas_consumer)? {
-                let mut label = BuilderData::from_slice(&label);
-                label.append_bit_bool(next_index == 1)?;
-                label.append_builder(&path)?;
-                return Ok((Some(label), leaf))
-            }
-            let ref mut fork = gas_consumer.load_cell(cursor.reference(1 - next_index)?)?;
-            if let (Some(path), leaf) = Self::down_to_leaf(fork, bit_len, max_len, next_index, gas_consumer)? {
-                let mut label = BuilderData::from_slice(&label);
-                label.append_bit_bool(next_index == 0)?;
-                label.append_builder(&path)?;
-                return Ok((Some(label), leaf))
-            }
-        } else if bit_len == label_length {
-            return Ok((Some(BuilderData::from_slice(&label)), Some(cursor.clone())))
-        }
-        Ok((None, None))
-    }
     fn data(&self) -> Option<&Cell>;
     fn data_mut(&mut self) -> &mut Option<Cell>;
     fn bit_len(&self) -> usize;
@@ -603,7 +503,7 @@ fn iterate_internal<F: FnMut(SliceData, SliceData) -> Result<bool>>(
         let n = cmp::min(2, cursor.remaining_references());
         for i in 0..n {
             let mut key = key.clone();
-            key.checked_append_references_and_data(&label)?;
+            key.append_bytestring(&label)?;
             key.append_bit_bool(i != 0)?;
             let ref mut child = SliceData::from(cursor.reference(i)?);
             if !iterate_internal(child, key, bit_len, found)? {
@@ -611,7 +511,7 @@ fn iterate_internal<F: FnMut(SliceData, SliceData) -> Result<bool>>(
             }
         }
     } else if label_length == bit_len {
-        key.checked_append_references_and_data(&label)?;
+        key.append_bytestring(&label)?;
         return found(key.into(), cursor.clone());
     }
     Ok(true)
@@ -786,7 +686,7 @@ fn remove_node<T: HashmapType>(
         let ref mut fork = gas_consumer.load_cell(cell.reference(1 - next_index)?)?;
         let mut label = BuilderData::from_slice(&prefix);
         label.append_bit_bool(next_index == 0)?;
-        label.checked_append_references_and_data(&fork.get_label(length)?)?; // with fork bit
+        label.append_bytestring(&fork.get_label(length)?)?; // with fork bit
         let is_leaf = T::is_leaf(fork);
         *cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(
             label.into(), bit_len, is_leaf, fork
