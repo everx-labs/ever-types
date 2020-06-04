@@ -182,7 +182,6 @@ fn find_leaf<T: HashmapType>(
                 false => next_index,
                 true => 1 - next_index,
             };
-            dbg!(key_bit, next_index, path.length_in_bits());
             if key_bit != next {
                 Ok(None)
             } else {
@@ -211,7 +210,6 @@ fn find_leaf<T: HashmapType>(
             path.append_bit_bool(key_bit == 1)?;
             let res = find_leaf::<T>(cursor.reference(key_bit)?, path, bit_len, key, next_index, eq, false, gas_consumer)?;
             if res.is_some() || key_bit != next {
-                dbg!(res.is_some(), key_bit, next, length_in_bits, path.length_in_bits());
                 return Ok(res)
             }
             path.trunc(length_in_bits)?;
