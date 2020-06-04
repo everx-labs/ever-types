@@ -472,94 +472,20 @@ pub trait HashmapType: Sized {
         }
         Ok(())
     }
-
     fn scan_diff<F>(&self, other: &Self, mut op: F) -> Result<bool> 
     where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> {
-        let bit_len_self = self.bit_len();
-        let bit_len_other = other.bit_len();
-        if bit_len_self != bit_len_other {
-            fail!("Different bitlen");
-        }
-        let mut cursor_self = match self.data() {
-            Some(data) => SliceData::from(data),
-            None => SliceData::default()
-        };
-        let mut cursor_other = match other.data() {
-            Some(data) => SliceData::from(data),
-            None => SliceData::default()
-        };
-        let _res = scan_diff_iterate(&mut cursor_self, &mut cursor_other, BuilderData::default(), bit_len_self, &mut op);
-        Ok(true)
+        if !self.iterate_slices(|key, value| {
+            let value2 = other.hashmap_get(key.clone(), &mut 0)?;
+            if Some(&value) != value2.as_ref() {
+                return op(key, Some(value), value2)
+            }
+            Ok(true)
+        })? { return Ok(false); }
+        other.iterate_slices(|key, value| match self.hashmap_get(key.clone(), &mut 0)? {
+            None => op(key, None, Some(value)),
+            Some(_) => Ok(true) // already checked in the first loop
+        })
     }
-}
-
-fn scan_diff_iterate<F>(cursor_self : &mut SliceData, cursor_other: &mut SliceData, mut key : BuilderData, mut bit_len : usize, op: &mut F) -> Result<bool> 
-where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> {
-    if *cursor_self == SliceData::default() && *cursor_other == SliceData::default() {
-        return Ok(true);
-    }
-    if *cursor_self == SliceData::default() {
-        let _res = iterate_internal(
-           cursor_other,
-           key,
-           bit_len, &mut |key, cursor| { return op(key.into(), None, Some(cursor.clone())); }
-        );
-        return Ok(true);
-    }
-    if *cursor_other == SliceData::default() {
-        let _res = iterate_internal(
-           cursor_self,
-           key,
-           bit_len, &mut |key, cursor| { return op(key.into(), Some(cursor.clone()), None); }
-        );
-        return Ok(true);
-    }
-    if cursor_self.cell().repr_hash() == cursor_other.cell().repr_hash() {
-        return Ok(true);  
-    }
-    let label = cursor_self.get_label(bit_len)?;
-    let label_length = label.remaining_bits();
-    if label_length < bit_len {
-        bit_len -= label_length + 1;
-        let n = cmp::min(2, cursor_self.remaining_references());
-        let m = cmp::min(2, cursor_other.remaining_references());
-        for i in 0..n {
-           let mut key = key.clone();
-           key.checked_append_references_and_data(&label)?;
-           key.append_bit_bool(i != 0)?;
-           let ref mut child_self = SliceData::from(cursor_self.reference(i)?);
-           if i < m{
-               let ref mut child_other = SliceData::from(cursor_other.reference(i)?);
-               if !scan_diff_iterate(child_self, child_other, key, bit_len, op)? {
-                   return Ok(false)
-               }
-           }
-           else {
-                let _res = iterate_internal(
-                    child_self,
-                    key,
-                    bit_len, &mut |key, cursor| { return op(key.into(), Some(cursor.clone()), None); }
-                );
-           }
-        }
-        for i in n..m {
-            let mut key = key.clone();
-            key.checked_append_references_and_data(&label)?;
-            key.append_bit_bool(i != 0)?;
-            let ref mut child_other = SliceData::from(cursor_other.reference(i)?); 
-            let _res = iterate_internal(
-                child_other,
-                key,
-                bit_len, &mut |key, cursor| { return op(key.into(), None, Some(cursor.clone())); }
-            );
-        }
-    } else if label_length == bit_len {
-       key.checked_append_references_and_data(&label)?;
-       if cursor_self != cursor_other {
-           return op(key.into(), Some(cursor_self.clone()), Some(cursor_other.clone()));
-       }
-    }
-    Ok(true)
 }
 
 /// iterate all elements with callback function
