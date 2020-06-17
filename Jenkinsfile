@@ -82,7 +82,7 @@ def buildBranchesMap() {
     } else {
         G_branches.put('ton-types', params.branch_ton_types)
     }
-    
+
     if (params.branch_ton_labs_types == '') {
         G_branches.put('ton-labs-types', "${env.BRANCH_NAME}")
     } else {
@@ -172,7 +172,7 @@ pipeline {
     tools {nodejs "Node12.8.0"}
     options {
         buildDiscarder logRotator(artifactDaysToKeepStr: '', artifactNumToKeepStr: '', daysToKeepStr: '', numToKeepStr: '1')
-        
+
         parallelsAlwaysFailFast()
     }
     agent {
@@ -330,10 +330,10 @@ pipeline {
                         C_TEXT = sh (script: 'git show -s --format=%s ${GIT_COMMIT}', returnStdout: true).trim()
                         C_AUTHOR = sh (script: 'git show -s --format=%an ${GIT_COMMIT}', returnStdout: true).trim()
                         C_HASH = sh (script: 'git show -s --format=%h ${GIT_COMMIT}', returnStdout: true).trim()
-                    
+
                         def buildCause = currentBuild.getBuildCauses()[0].shortDescription
                         echo "Build cause: ${buildCause}"
-                        
+
                         buildParams()
                         echo "${G_params}"
                     }
@@ -380,7 +380,7 @@ pipeline {
                                     docker.withRegistry('', G_docker_creds) {
                                         args = "--pull --no-cache --label 'git-commit=${GIT_COMMIT}' --force-rm --target ton-labs-types-src ."
                                         G_docker_image = docker.build(
-                                            G_images['ton-labs-types'], 
+                                            G_images['ton-labs-types'],
                                             args
                                         )
                                         echo "Image ${G_docker_image} as ${G_images['ton-labs-types']}"
@@ -393,7 +393,7 @@ pipeline {
                             agent {
                                 dockerfile {
                                     registryCredentialsId "${G_docker_creds}"
-                                    additionalBuildArgs "--pull --target ton-labs-types-rust " + 
+                                    additionalBuildArgs "--pull --target ton-labs-types-rust " +
                                                         "--build-arg \"TON_LABS_TYPES_IMAGE=${G_images['ton-labs-types']}\""
                                 }
                             }
@@ -415,7 +415,7 @@ pipeline {
                             agent {
                                 dockerfile {
                                     registryCredentialsId "${G_docker_creds}"
-                                    additionalBuildArgs "--pull --target ton-labs-types-rust " + 
+                                    additionalBuildArgs "--pull --target ton-labs-types-rust " +
                                                         "--build-arg \"TON_LABS_TYPES_IMAGE=${G_images['ton-labs-types']}\""
                                 }
                             }
@@ -459,7 +459,7 @@ pipeline {
                 script {
                     cleanWs notFailBuild: true
                 }
-            } 
+            }
         }
         failure {
             script {
