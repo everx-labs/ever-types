@@ -168,9 +168,6 @@ impl fmt::Display for CellType {
     }
 }
 
-#[derive(Clone)]
-pub struct Cell(Arc<dyn CellImpl>);
-
 pub trait CellImpl: Sync + Send {
     fn data(&self) -> &[u8];
     fn cell_data(&self) -> &CellData;
@@ -195,6 +192,9 @@ pub trait CellImpl: Sync + Send {
         self.cell_type() == CellType::PrunedBranch
     }
 }
+
+#[derive(Clone)]
+pub struct Cell(Arc<dyn CellImpl>);
 
 impl Cell {
 
@@ -312,30 +312,7 @@ impl Cell {
     }
 
     pub fn to_hex_string(&self, lower: bool) -> String {
-        let len = self.bit_length();
-        if len == 0 {
-            return String::new()
-        }
-        let mut result = if lower {
-            hex::encode(&self.data())
-        } else {
-            hex::encode_upper(&self.data())
-        };
-        match len % 8 {
-            0 => {
-                result.pop();
-                result.pop();
-            }
-            1..=3 => {
-                result.pop();
-                result.push('_')
-            }
-            4 => {
-                result.pop();
-            }
-            _ => result.push('_')
-        }
-        result
+        to_hex_string(self.data(), self.bit_length(), lower)
     }
 
     fn print_indent(f: &mut fmt::Formatter, indent: &str, last_child: bool, first_line: bool) -> fmt::Result {
@@ -705,7 +682,7 @@ impl CellData {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DataCell {
     cell_data: CellData,
     references: Vec<Cell>,
@@ -782,7 +759,12 @@ impl DataCell {
                     fail!(ExceptionCode::CellOverflow)
                 }
             },
-            CellType::LibraryReference => { },
+            CellType::LibraryReference => {
+                if bit_len != 8 * (1 + SHA256_SIZE) || !self.references.is_empty() {
+                    dbg!(bit_len, self.references.len());
+                    fail!(ExceptionCode::InvalidOpcode)
+                }
+            }
             CellType::Unknown => fail!(ExceptionCode::RangeCheckError)
         }
 
@@ -795,7 +777,7 @@ impl DataCell {
         let level_mask = match self.cell_type() {
             CellType::Ordinary => children_mask,
             CellType::PrunedBranch => self.level_mask(),
-            CellType::LibraryReference => LevelMask::with_mask(0), // TODO ???
+            CellType::LibraryReference => LevelMask::with_mask(0),
             CellType::MerkleProof => LevelMask::for_merkle_cell(children_mask),
             CellType::MerkleUpdate => LevelMask::for_merkle_cell(children_mask),
             CellType::Unknown => fail!(ExceptionCode::RangeCheckError)
@@ -1090,3 +1072,29 @@ pub use self::builder::*;
 mod builder_operations;
 pub use self::builder_operations::*;
 use std::io::{Write, Read, ErrorKind};
+
+pub(crate) fn to_hex_string(data: &[u8], len: usize, lower: bool) -> String {
+    if len == 0 {
+        return String::new()
+    }
+    let mut result = if lower {
+        hex::encode(data)
+    } else {
+        hex::encode_upper(data)
+    };
+    match len % 8 {
+        0 => {
+            result.pop();
+            result.pop();
+        }
+        1..=3 => {
+            result.pop();
+            result.push('_')
+        }
+        4 => {
+            result.pop();
+        }
+        _ => result.push('_')
+    }
+    result
+}

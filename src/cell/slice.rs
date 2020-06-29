@@ -692,12 +692,18 @@ impl fmt::Display for SliceData {
 
 impl fmt::LowerHex for SliceData {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:x}", self.into_cell())
+        let len = self.remaining_bits();
+        let mut data = self.get_bytestring(0);
+        super::append_tag(&mut data, len);
+        write!(f, "{}", super::to_hex_string(&data, len, true))
     }
 }
 
 impl fmt::UpperHex for SliceData {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{:X}", self.into_cell())
+        let len = self.remaining_bits();
+        let mut data = self.get_bytestring(0);
+        super::append_tag(&mut data, len);
+        write!(f, "{}", super::to_hex_string(&data, len, false))
     }
 }
