@@ -761,7 +761,6 @@ impl DataCell {
             },
             CellType::LibraryReference => {
                 if bit_len != 8 * (1 + SHA256_SIZE) || !self.references.is_empty() {
-                    dbg!(bit_len, self.references.len());
                     fail!(ExceptionCode::InvalidOpcode)
                 }
             }
