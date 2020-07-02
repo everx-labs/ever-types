@@ -139,11 +139,6 @@ impl SliceData {
         BuilderData::new().into()
     }
 
-    pub fn is_default(&self) -> bool {
-        if *self == SliceData::default() { return true; }
-        return false;
-    }
-
     pub fn from_string(value: &str) -> Result<SliceData> {
         parse_slice_base(value, 0, 16)
             .ok_or(error!(ExceptionCode::FatalError))
