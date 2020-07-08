@@ -54,7 +54,7 @@ pub trait GasConsumer {
 
 impl GasConsumer for u64 {
     fn finalize_cell(&mut self, builder: BuilderData) -> Result<Cell> {
-        builder.into_cell()
+        Ok(builder.into())
     }
     fn load_cell(&mut self, cell: Cell) -> Result<SliceData> {
         Ok(cell.into())

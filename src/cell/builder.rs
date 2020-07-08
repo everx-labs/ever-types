@@ -31,25 +31,25 @@ pub struct BuilderData {
 
 impl From<BuilderData> for Cell {
     fn from(builder: BuilderData) -> Self {
-        builder.into_cell().unwrap()
+        builder.into_cell()
     }
 }
 
 impl From<BuilderData> for SliceData {
     fn from(builder: BuilderData) -> Self {
-        builder.into_cell().unwrap().into()
+        builder.into_cell().into()
     }
 }
 
 impl From<&BuilderData> for Cell {
     fn from(builder: &BuilderData) -> Self {
-        builder.clone().into_cell().unwrap()
+        builder.clone().into_cell()
     }
 }
 
 impl From<&BuilderData> for SliceData {
     fn from(builder: &BuilderData) -> Self {
-        builder.clone().into_cell().unwrap().into()
+        builder.clone().into_cell().into()
     }
 }
 
@@ -126,7 +126,7 @@ impl BuilderData {
         builder
     }
 
-    pub fn into_cell(mut self) -> Result<Cell> {
+    fn into_cell(mut self) -> Cell {
         if self.cell_type == CellType::Ordinary {
             // For Ordinary cells - level is set automatically,
             // for other types - it must be set manually by set_level_mask()
@@ -136,7 +136,7 @@ impl BuilderData {
         }
         append_tag(&mut self.data, self.length_in_bits);
 
-        Ok(Cell::with_cell_impl(
+        Cell::with_cell_impl(
             DataCell::with_params(
                 self.references,
                 self.data,
@@ -144,8 +144,8 @@ impl BuilderData {
                 self.level_mask.mask(),
                 None,
                 None,
-            )?
-        ))
+            ).unwrap()
+        )
     }
 
     pub fn references(&self) -> &[Cell] {
