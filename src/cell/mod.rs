@@ -729,7 +729,7 @@ impl DataCell {
                 if bit_len != 8 * (1 + 1 + (self.level() as usize) * (SHA256_SIZE + 2)) ||
                     self.references.len() > 0
                 {
-                    fail!(ExceptionCode::RangeCheckError)
+                    fail!(ExceptionCode::CellOverflow)
                 }
                 if self.data()[0] != u8::from(CellType::PrunedBranch) ||
                    self.data()[1] != self.cell_data.level_mask.0 {
@@ -741,7 +741,7 @@ impl DataCell {
                 if bit_len != 8 * (1 + SHA256_SIZE + 2) ||
                     self.references.len() != 1
                 {
-                    fail!(ExceptionCode::RangeCheckError)
+                    fail!(ExceptionCode::CellOverflow)
                 }
                 // TODO check hashes and depths
             },
@@ -750,7 +750,7 @@ impl DataCell {
                 if bit_len != 8 * (1 + 2 * (SHA256_SIZE + 2)) ||
                     self.references.len() != 2
                 {
-                    fail!(ExceptionCode::RangeCheckError)
+                    fail!(ExceptionCode::CellOverflow)
                 }
                 // TODO check hashes and depths
             },
@@ -761,10 +761,10 @@ impl DataCell {
             },
             CellType::LibraryReference => {
                 if bit_len != 8 * (1 + SHA256_SIZE) || !self.references.is_empty() {
-                    fail!(ExceptionCode::InvalidOpcode)
+                    fail!(ExceptionCode::CellOverflow)
                 }
             }
-            CellType::Unknown => fail!(ExceptionCode::RangeCheckError)
+            CellType::Unknown => fail!(ExceptionCode::CellOverflow)
         }
 
         // Check level
