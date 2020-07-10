@@ -199,7 +199,7 @@ impl str::FromStr for AccountId {
 
 // Exceptions *****************************************************************
 
-#[derive(Clone, Copy, Debug, num_derive::FromPrimitive, PartialEq, failure::Fail)]
+#[derive(Clone, Copy, Debug, num_derive::FromPrimitive, PartialEq, Eq, failure::Fail)]
 pub enum ExceptionCode {
     #[fail(display = "normal termination")]
     NormalTermination = 0,
