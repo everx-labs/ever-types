@@ -271,7 +271,13 @@ impl SliceData {
     }
     /// constructs new cell trunking original regarding window settings
     pub fn into_cell(&self) -> Cell {
-        BuilderData::from_slice(self).into()
+        if self.references_window.start == 0 && self.data_window.start == 0
+            && self.references_window.end == self.cell.references_count()
+            && self.data_window.end == self.cell.bit_length() {
+            self.cell.clone()
+        } else {
+            BuilderData::from_slice(self).into()
+        }
     }
 
     pub fn checked_drain_reference(&mut self) -> Result<Cell> {

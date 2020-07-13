@@ -470,24 +470,230 @@ pub trait HashmapType: Sized {
         }
         Ok(())
     }
+
     fn scan_diff<F>(&self, other: &Self, mut op: F) -> Result<bool> 
     where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> {
-        if !self.iterate_slices(|key, value| {
-            let value2 = other.hashmap_get(key.clone(), &mut 0)?;
-            if Some(&value) != value2.as_ref() {
-                return op(key, Some(value), value2)
+        let bit_len_1 = self.bit_len();
+        let bit_len_2 = other.bit_len();
+        if bit_len_1 != bit_len_2 {
+            fail!("Different bitlen");
+        }
+        if self.data() == other.data() {
+            return Ok(true)
+        } else if let (Some(cursor_1), Some(cursor_2)) = (self.data(), other.data()) {
+            let mut cursor1 = SliceData::from(cursor_1);
+            let mut cursor2 = SliceData::from(cursor_2);
+            let label1 = cursor1.get_label(bit_len_1)?;
+            let label2 = cursor2.get_label(bit_len_2)?;
+            let l1 = label1.remaining_bits();
+            let l2 = label2.remaining_bits();
+            if l1 > l2 {
+                let time_l = bit_len_1 - l1;
+                let time2 = bit_len_1 - l2;
+                let key1 = BuilderData::from_slice(&label1);
+                let key2 = BuilderData::from_slice(&label2);
+                let mut queue : Vec<(SliceData, BuilderData, usize, SliceData, BuilderData, usize)> = Vec::new();
+                queue.push((cursor2.clone(), key2.clone(), time2, cursor2.clone(), key2.clone(), time2));   
+                let mut ind = 0;
+                while ind < queue.len() {
+                    if queue[ind].2 <= time_l {
+                        let c1 = if queue[ind].1 == key1 {
+                            Some(cursor1.into_cell())
+                        } else {
+                            None
+                        };
+                        if !dict_scan_diff(c1, Some(queue[ind].3.cell().clone()), key1.clone(), queue[ind].4.clone(), time_l, queue[ind].5.clone(), &mut op)? {
+                            return Ok(false)
+                        }
+                    } else {
+                        let n = cmp::min(2, queue[ind].0.remaining_references());
+                        for i in 0..n {
+                            let mut key = queue[ind].1.clone();
+                            key.append_bit_bool(i != 0)?;
+                            let key1 = key.clone();
+                            let mut child = SliceData::from(queue[ind].0.reference(i)?);
+                            let child1 = child.clone();
+                            let label = child.get_label(queue[ind].2 - 1)?;
+                            let l = label.remaining_bits();
+                            key.append_bytestring(&label)?; 
+                            queue.push((child.clone(), key.clone(), queue[ind].2 - l - 1, child1, key1, queue[ind].2 - 1));                     
+                        }
+                    }
+                    ind += 1;
+                }
+                return Ok(true)
+            } else if l1 < l2 {
+                let time_l = bit_len_1 - l2;
+                let time1 = bit_len_1 - l1;
+                let key1 = BuilderData::from_slice(&label1);
+                let key2 = BuilderData::from_slice(&label2);
+                let mut queue : Vec<(SliceData, BuilderData, usize, SliceData, BuilderData, usize)> = Vec::new();
+                queue.push((cursor1.clone(), key1.clone(), time1, cursor1.clone(), key1.clone(), time1));   
+                let mut ind = 0;
+                while ind < queue.len() {
+                    if queue[ind].2 <= time_l {
+                        let c2 = if queue[ind].1 == key2 {
+                            Some(cursor2.into_cell())
+                        } else {
+                            None
+                        };
+                        if !dict_scan_diff(Some(queue[ind].3.clone().cell().clone()), c2, queue[ind].4.clone(), key2.clone(), queue[ind].5.clone(), time_l, &mut op)? {
+                            return Ok(false)
+                        }
+                    } else {
+                        let n = cmp::min(2, queue[ind].0.remaining_references());
+                        for i in 0..n {
+                            let mut key = queue[ind].1.clone();
+                            key.append_bit_bool(i != 0)?;
+                            let key1 = key.clone();
+                            let ref mut child = SliceData::from(queue[ind].0.reference(i)?);  
+                            let child1 = child.clone();  
+                            let label = child.get_label(queue[ind].2 - 1)?;
+                            let l = label.remaining_bits();
+                            key.append_bytestring(&label)?; 
+                            queue.push((child.clone(), key.clone(), queue[ind].2 - l - 1, child1, key1, queue[ind].2 - 1));                     
+                        }
+                    }
+                    ind += 1;
+                }
+                return Ok(true)
             }
-            Ok(true)
-        })? { return Ok(false); }
-        other.iterate_slices(|key, value| match self.hashmap_get(key.clone(), &mut 0)? {
-            None => op(key, None, Some(value)),
-            Some(_) => Ok(true) // already checked in the first loop
-        })
+        }
+        dict_scan_diff(self.data().cloned(), other.data().cloned(), BuilderData::default(), BuilderData::default(), bit_len_1, bit_len_2, &mut op)
     }
 }
 
+fn dict_scan_diff<F>(cell_1 : Option<Cell>, cell_2: Option<Cell>, mut key1 : BuilderData, mut key2 : BuilderData, bit_len_1 : usize, bit_len_2 : usize, op: &mut F) -> Result<bool> 
+where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> {
+    let (mut cursor_1, mut cursor_2) = match (cell_1, cell_2) {
+        (Some(cell_1), Some(cell_2)) => if cell_1 == cell_2 {
+            return Ok(true)
+        } else {
+            (SliceData::from(cell_1), SliceData::from(cell_2))
+        }
+        (Some(cell), None) => return iterate_internal(
+            &mut SliceData::from(cell),
+            key1,
+            bit_len_1,
+            &mut |key, cursor| op(key, Some(cursor), None)
+        ),
+        (None, Some(cell)) => return iterate_internal(
+            &mut SliceData::from(cell),
+            key2,
+            bit_len_2,
+            &mut |key, cursor| op(key, None, Some(cursor))
+        ),
+        _ => return Ok(true)
+    };
+    let label1 = cursor_1.get_label(bit_len_1)?;
+    let label2 = cursor_2.get_label(bit_len_2)?;
+    let l1 = label1.remaining_bits();
+    let l2 = label2.remaining_bits();
+    if bit_len_1 == l1 && bit_len_2 != l2 { // leaf of 1 is reached
+        key1.append_bytestring(&label1)?;
+        key2.append_bytestring(&label2)?;
+        let mut chk = false;
+        if !iterate_internal_raw(
+            &mut cursor_2,
+            key2,
+            bit_len_2 - l2,
+            &mut |key, cursor| if key1 != key {
+                op(key.into(), None, Some(cursor))
+            } else { 
+                chk = true; 
+                match cursor == cursor_1 {
+                    true => Ok(true),
+                    false => op(key.into(), Some(cursor_1.clone()), Some(cursor))
+                }
+            }
+        )? {
+            return Ok(false)
+        } else if !chk { 
+            return op(key1.into(), Some(cursor_1), None)
+        }
+        return Ok(true)
+    }
+    if bit_len_1 != l1 && bit_len_2 == l2 { // leaf of 2 is reached
+        key1.append_bytestring(&label1)?;
+        key2.append_bytestring(&label2)?;
+        let mut chk = false;
+        if !iterate_internal_raw(
+            &mut cursor_1,
+            key1,
+            bit_len_1 - l1,
+            &mut |key, cursor| if key2 != key {
+                op(key.into(), Some(cursor), None)
+            } else {
+                chk = true;
+                match cursor == cursor_2 {
+                    true => Ok(true),
+                    false => op(key.into(), Some(cursor), Some(cursor_2.clone()))
+                }
+            }
+        )? {
+            return Ok(false)
+        } else if !chk { 
+            return op(key2.into(), None, Some(cursor_2))
+        }
+        return Ok(true)
+    }
+    if bit_len_1 - l1 == bit_len_2 - l2 { // same level reached
+        key1.append_bytestring(&label1)?;
+        key2.append_bytestring(&label2)?;
+        debug_assert!(key1 == key2);
+        if bit_len_1 == l1 {
+            return op(key1.into(), Some(cursor_1), Some(cursor_2))
+        }
+        let n1 = cmp::min(2, cursor_1.remaining_references());
+        let n2 = cmp::min(2, cursor_2.remaining_references());
+        let n = cmp::min(n1, n2);
+        for i in 0..n {
+            let mut key = key1.clone();
+            key.append_bit_bool(i != 0)?;
+            let child1 = Some(cursor_1.reference(i)?);
+            let child2 = Some(cursor_2.reference(i)?);
+            if !dict_scan_diff(child1, child2, key.clone(), key, bit_len_1 - l1 - 1, bit_len_2 - l2 - 1, op)? {
+                return Ok(false)
+            }
+        } 
+        for i in n..n1 {
+            let mut key = key1.clone();
+            key.append_bit_bool(i != 0)?;
+            let child = Some(cursor_1.reference(i)?);
+            if !dict_scan_diff(child, None, key.clone(), key, bit_len_1 - l1 - 1, bit_len_2, op)? {
+                return Ok(false)
+            }
+        }  
+        for i in n..n2 {
+            let mut key = key1.clone();
+            key.append_bit_bool(i != 0)?;
+            let child = Some(cursor_2.reference(i)?);
+            if !dict_scan_diff(None, child, key.clone(), key, bit_len_1, bit_len_2 - l2 - 1, op)? {
+                return Ok(false)
+            }
+        }   
+        return Ok(true);
+    }
+    return Ok(true);
+}
+
+
 /// iterate all elements with callback function
-fn iterate_internal<F: FnMut(SliceData, SliceData) -> Result<bool>>(
+fn iterate_internal<F: FnMut(SliceData, SliceData) -> Result<bool>> (
+    cursor: &mut SliceData, 
+    key: BuilderData, 
+    bit_len: usize, 
+    found: &mut F
+) -> Result<bool> {
+    iterate_internal_raw(
+        cursor,
+        key,
+        bit_len,
+        &mut |key, value| found(key.into(), value)
+    )
+}
+    /// iterate all elements with callback function
+fn iterate_internal_raw<F: FnMut(BuilderData, SliceData) -> Result<bool>>(
     cursor: &mut SliceData, 
     mut key: BuilderData, 
     mut bit_len: usize, 
@@ -504,13 +710,13 @@ fn iterate_internal<F: FnMut(SliceData, SliceData) -> Result<bool>>(
             key.append_bytestring(&label)?;
             key.append_bit_bool(i != 0)?;
             let ref mut child = SliceData::from(cursor.reference(i)?);
-            if !iterate_internal(child, key, bit_len, found)? {
+            if !iterate_internal_raw(child, key, bit_len, found)? {
                 return Ok(false)
             }
         }
     } else if label_length == bit_len {
         key.append_bytestring(&label)?;
-        return found(key.into(), cursor.clone());
+        return found(key, cursor.clone())
     }
     Ok(true)
 }
