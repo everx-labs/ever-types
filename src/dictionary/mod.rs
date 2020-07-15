@@ -640,10 +640,16 @@ where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> 
     if bit_len_1 - l1 == bit_len_2 - l2 { // same level reached
         key1.append_bytestring(&label1)?;
         key2.append_bytestring(&label2)?;
-        debug_assert!(key1 == key2);
         if bit_len_1 == l1 {
-            return op(key1.into(), Some(cursor_1), Some(cursor_2))
+            if key1 == key2 {
+                return op(key1.into(), Some(cursor_1), Some(cursor_2))
+            } else {
+                return Ok(op(key1.into(), Some(cursor_1), None)?
+                    && op(key2.into(), None, Some(cursor_2))?)
+
+            }
         }
+        debug_assert!(key1 == key2);
         let n1 = cmp::min(2, cursor_1.remaining_references());
         let n2 = cmp::min(2, cursor_2.remaining_references());
         let n = cmp::min(n1, n2);
