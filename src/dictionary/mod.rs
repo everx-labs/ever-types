@@ -471,21 +471,6 @@ pub trait HashmapType: Sized {
         Ok(())
     }
 
-    fn scan_diff_long<F>(&self, other: &Self, mut op: F) -> Result<bool> 
-    where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> {
-        if !self.iterate(&mut |key, value| {
-            let value2 = other.hashmap_get(key.clone(), &mut 0)?;
-            if Some(&value) != value2.as_ref() {
-                return op(key, Some(value), value2)
-            }
-            Ok(true)
-        })? { return Ok(false); }
-        other.iterate(&mut |key, value| match self.hashmap_get(key.clone(), &mut 0)? {
-            None => op(key, None, Some(value)),
-            Some(_) => Ok(true) // already checked in the first loop
-        })
-    }
-
     fn scan_diff<F>(&self, other: &Self, mut op: F) -> Result<bool> 
     where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> {
         let bit_len_1 = self.bit_len();
