@@ -77,6 +77,10 @@ impl UInt256 {
     pub fn to_hex_string(&self) -> String {
         hex::encode(self.0)
     }
+
+    pub fn max() -> Self {
+        Self::from([0xFF; 32])
+    }
 }
 
 impl From<[u8;32]> for UInt256 {

@@ -667,8 +667,7 @@ impl SliceData {
     pub fn append_reference(&mut self, other: SliceData) -> &mut SliceData {
         let mut builder = BuilderData::from_slice(self);
         builder.append_reference(BuilderData::from_slice(&other));
-        let slice = SliceData::from(Cell::from(builder));
-        mem::replace(self, slice);
+        *self = SliceData::from(Cell::from(builder));
         self
     }
 
