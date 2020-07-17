@@ -110,6 +110,8 @@ pub fn hm_label(key: &SliceData, max: usize) -> Result<BuilderData> {
 // reading hmLabel from SliceData
 impl SliceData {
     pub fn get_label(&mut self, max: usize) -> Result<SliceData> {
+        // note: in case of max is 0 it is normal to read bits from the slice
+        // but if you mistakely pass 0 to this function it causes undefined behavoiur
         if self.is_empty() {
             Ok(SliceData::default())
         } else if !self.get_next_bit()? {
@@ -471,22 +473,7 @@ pub trait HashmapType: Sized {
         Ok(())
     }
 
-    fn scan_diff_long<F>(&self, other: &Self, mut op: F) -> Result<bool> 
-    where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> {
-        if !self.iterate(&mut |key, value| {
-            let value2 = other.hashmap_get(key.clone(), &mut 0)?;
-            if Some(&value) != value2.as_ref() {
-                return op(key, Some(value), value2)
-            }
-            Ok(true)
-        })? { return Ok(false); }
-        other.iterate(&mut |key, value| match self.hashmap_get(key.clone(), &mut 0)? {
-            None => op(key, None, Some(value)),
-            Some(_) => Ok(true) // already checked in the first loop
-        })
-    }
-
-    fn scan_diff<F>(&self, other: &Self, mut op: F) -> Result<bool> 
+    fn scan_diff<F>(&self, other: &Self, mut func: F) -> Result<bool> 
     where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> {
         let bit_len_1 = self.bit_len();
         let bit_len_2 = other.bit_len();
@@ -517,21 +504,23 @@ pub trait HashmapType: Sized {
                         } else {
                             None
                         };
-                        if !dict_scan_diff(c1, Some(queue[ind].3.cell().clone()), key1.clone(), queue[ind].4.clone(), time_l, queue[ind].5.clone(), &mut op)? {
+                        if !dict_scan_diff(c1, Some(queue[ind].3.cell().clone()), key1.clone(), queue[ind].4.clone(), time_l, queue[ind].5.clone(), &mut func)? {
                             return Ok(false)
                         }
                     } else {
                         let n = cmp::min(2, queue[ind].0.remaining_references());
                         for i in 0..n {
-                            let mut key = queue[ind].1.clone();
-                            key.append_bit_bool(i != 0)?;
-                            let key1 = key.clone();
-                            let mut child = SliceData::from(queue[ind].0.reference(i)?);
-                            let child1 = child.clone();
-                            let label = child.get_label(queue[ind].2 - 1)?;
-                            let l = label.remaining_bits();
-                            key.append_bytestring(&label)?; 
-                            queue.push((child.clone(), key.clone(), queue[ind].2 - l - 1, child1, key1, queue[ind].2 - 1));                     
+                            if queue[ind].2 != 1 {
+                                let mut key = queue[ind].1.clone();
+                                key.append_bit_bool(i != 0)?;
+                                let key1 = key.clone();
+                                let mut child = SliceData::from(queue[ind].0.reference(i)?);
+                                let child1 = child.clone();
+                                let label = child.get_label(queue[ind].2 - 1)?;
+                                let l = label.remaining_bits();
+                                key.append_bytestring(&label)?; 
+                                queue.push((child.clone(), key, queue[ind].2 - l - 1, child1, key1, queue[ind].2 - 1));
+                            }
                         }
                     }
                     ind += 1;
@@ -552,21 +541,23 @@ pub trait HashmapType: Sized {
                         } else {
                             None
                         };
-                        if !dict_scan_diff(Some(queue[ind].3.clone().cell().clone()), c2, queue[ind].4.clone(), key2.clone(), queue[ind].5.clone(), time_l, &mut op)? {
+                        if !dict_scan_diff(Some(queue[ind].3.cell().clone()), c2, queue[ind].4.clone(), key2.clone(), queue[ind].5.clone(), time_l, &mut func)? {
                             return Ok(false)
                         }
                     } else {
                         let n = cmp::min(2, queue[ind].0.remaining_references());
                         for i in 0..n {
-                            let mut key = queue[ind].1.clone();
-                            key.append_bit_bool(i != 0)?;
-                            let key1 = key.clone();
-                            let ref mut child = SliceData::from(queue[ind].0.reference(i)?);  
-                            let child1 = child.clone();  
-                            let label = child.get_label(queue[ind].2 - 1)?;
-                            let l = label.remaining_bits();
-                            key.append_bytestring(&label)?; 
-                            queue.push((child.clone(), key.clone(), queue[ind].2 - l - 1, child1, key1, queue[ind].2 - 1));                     
+                            if queue[ind].2 != 1 {
+                                let mut key = queue[ind].1.clone();
+                                key.append_bit_bool(i != 0)?;
+                                let key1 = key.clone();
+                                let ref mut child = SliceData::from(queue[ind].0.reference(i)?);
+                                let child1 = child.clone();
+                                let label = child.get_label(queue[ind].2 - 1)?;
+                                let l = label.remaining_bits();
+                                key.append_bytestring(&label)?; 
+                                queue.push((child.clone(), key, queue[ind].2 - l - 1, child1, key1, queue[ind].2 - 1));
+                            }
                         }
                     }
                     ind += 1;
@@ -574,11 +565,19 @@ pub trait HashmapType: Sized {
                 return Ok(true)
             }
         }
-        dict_scan_diff(self.data().cloned(), other.data().cloned(), BuilderData::default(), BuilderData::default(), bit_len_1, bit_len_2, &mut op)
+        dict_scan_diff(self.data().cloned(), other.data().cloned(), BuilderData::default(), BuilderData::default(), bit_len_1, bit_len_2, &mut func)
     }
 }
 
-fn dict_scan_diff<F>(cell_1 : Option<Cell>, cell_2: Option<Cell>, mut key1 : BuilderData, mut key2 : BuilderData, bit_len_1 : usize, bit_len_2 : usize, op: &mut F) -> Result<bool> 
+fn dict_scan_diff<F>(
+    cell_1: Option<Cell>,
+    cell_2: Option<Cell>,
+    mut key1 : BuilderData,
+    mut key2 : BuilderData,
+    bit_len_1 : usize,
+    bit_len_2 : usize,
+    func: &mut F
+) -> Result<bool> 
 where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> {
     let (mut cursor_1, mut cursor_2) = match (cell_1, cell_2) {
         (Some(cell_1), Some(cell_2)) => if cell_1 == cell_2 {
@@ -590,13 +589,13 @@ where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> 
             &mut SliceData::from(cell),
             key1,
             bit_len_1,
-            &mut |key, cursor| op(key, Some(cursor), None)
+            &mut |key, cursor| func(key, Some(cursor), None)
         ),
         (None, Some(cell)) => return iterate_internal(
             &mut SliceData::from(cell),
             key2,
             bit_len_2,
-            &mut |key, cursor| op(key, None, Some(cursor))
+            &mut |key, cursor| func(key, None, Some(cursor))
         ),
         _ => return Ok(true)
     };
@@ -613,18 +612,18 @@ where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> 
             key2,
             bit_len_2 - l2,
             &mut |key, cursor| if key1 != key {
-                op(key.into(), None, Some(cursor))
+                func(key.into(), None, Some(cursor))
             } else { 
                 chk = true; 
                 match cursor == cursor_1 {
                     true => Ok(true),
-                    false => op(key.into(), Some(cursor_1.clone()), Some(cursor))
+                    false => func(key.into(), Some(cursor_1.clone()), Some(cursor))
                 }
             }
         )? {
             return Ok(false)
         } else if !chk { 
-            return op(key1.into(), Some(cursor_1), None)
+            return func(key1.into(), Some(cursor_1), None)
         }
         return Ok(true)
     }
@@ -637,18 +636,18 @@ where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> 
             key1,
             bit_len_1 - l1,
             &mut |key, cursor| if key2 != key {
-                op(key.into(), Some(cursor), None)
+                func(key.into(), Some(cursor), None)
             } else {
                 chk = true;
                 match cursor == cursor_2 {
                     true => Ok(true),
-                    false => op(key.into(), Some(cursor), Some(cursor_2.clone()))
+                    false => func(key.into(), Some(cursor), Some(cursor_2.clone()))
                 }
             }
         )? {
             return Ok(false)
         } else if !chk { 
-            return op(key2.into(), None, Some(cursor_2))
+            return func(key2.into(), None, Some(cursor_2))
         }
         return Ok(true)
     }
@@ -657,10 +656,10 @@ where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> 
         key2.append_bytestring(&label2)?;
         if bit_len_1 == l1 {
             if key1 == key2 {
-                return op(key1.into(), Some(cursor_1), Some(cursor_2))
+                return func(key1.into(), Some(cursor_1), Some(cursor_2))
             } else {
-                return Ok(op(key1.into(), Some(cursor_1), None)?
-                    && op(key2.into(), None, Some(cursor_2))?)
+                return Ok(func(key1.into(), Some(cursor_1), None)?
+                    && func(key2.into(), None, Some(cursor_2))?)
 
             }
         }
@@ -673,7 +672,7 @@ where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> 
             key.append_bit_bool(i != 0)?;
             let child1 = Some(cursor_1.reference(i)?);
             let child2 = Some(cursor_2.reference(i)?);
-            if !dict_scan_diff(child1, child2, key.clone(), key, bit_len_1 - l1 - 1, bit_len_2 - l2 - 1, op)? {
+            if !dict_scan_diff(child1, child2, key.clone(), key, bit_len_1 - l1 - 1, bit_len_2 - l2 - 1, func)? {
                 return Ok(false)
             }
         } 
@@ -681,7 +680,7 @@ where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> 
             let mut key = key1.clone();
             key.append_bit_bool(i != 0)?;
             let child = Some(cursor_1.reference(i)?);
-            if !dict_scan_diff(child, None, key.clone(), key, bit_len_1 - l1 - 1, bit_len_2, op)? {
+            if !dict_scan_diff(child, None, key.clone(), key, bit_len_1 - l1 - 1, bit_len_2, func)? {
                 return Ok(false)
             }
         }  
@@ -689,7 +688,7 @@ where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> 
             let mut key = key1.clone();
             key.append_bit_bool(i != 0)?;
             let child = Some(cursor_2.reference(i)?);
-            if !dict_scan_diff(None, child, key.clone(), key, bit_len_1, bit_len_2 - l2 - 1, op)? {
+            if !dict_scan_diff(None, child, key.clone(), key, bit_len_1, bit_len_2 - l2 - 1, func)? {
                 return Ok(false)
             }
         }   
