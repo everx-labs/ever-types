@@ -47,8 +47,20 @@ impl From<&BuilderData> for Cell {
     }
 }
 
+impl From<&mut BuilderData> for Cell {
+    fn from(builder: &mut BuilderData) -> Self {
+        builder.clone().into_cell().unwrap()
+    }
+}
+
 impl From<&BuilderData> for SliceData {
     fn from(builder: &BuilderData) -> Self {
+        builder.clone().into_cell().unwrap().into()
+    }
+}
+
+impl From<&mut BuilderData> for SliceData {
+    fn from(builder: &mut BuilderData) -> Self {
         builder.clone().into_cell().unwrap().into()
     }
 }
@@ -154,6 +166,21 @@ impl BuilderData {
 
     pub fn data(&self) -> &[u8] {
         &self.data
+    }
+
+    // TODO: refactor it compare directly in BuilderData
+    pub fn compare_data(&self, other: &Self) -> (Option<usize>, Option<usize>) {
+        if self == other {
+            return (None, None)
+        }
+        let label1 = SliceData::from(self);
+        let label2 = SliceData::from(other);
+        let (_prefix, rem1, rem2) = SliceData::common_prefix(&label1, &label2);
+        // unwraps are safe because common_prefix returns None if slice is empty
+        (
+            rem1.map(|rem| rem.get_bits(0, 1).expect("check common_prefix function") as usize),
+            rem2.map(|rem| rem.get_bits(0, 1).expect("check common_prefix function") as usize)
+        )
     }
 
     pub fn from_slice(slice: &SliceData) -> BuilderData {
