@@ -149,8 +149,11 @@ impl LabelReader {
             already_read: false
         }
     }
+    pub fn with_cell(cursor: &Cell) -> Self {
+        Self::new(cursor.into())
+    }
     pub fn next_reader(&self, index: usize) -> Result<Self> {
-        Ok(Self::new(self.reference(index)?.into()))
+        Ok(Self::with_cell(&self.reference(index)?))
     }
     pub fn already_read(&self) -> bool {
         self.already_read
@@ -202,6 +205,8 @@ impl LabelReader {
 }
 
 // reading hmLabel from SliceData
+// obsolete - don't use, to be removed
+// use LabelReader adapter
 impl SliceData {
     pub fn get_label_raw(&mut self, max: &mut usize, key: BuilderData) -> Result<BuilderData> {
         let mut cursor = LabelReader::new(std::mem::replace(self, SliceData::default()));
@@ -420,29 +425,14 @@ pub trait HashmapType: Sized {
     }
 
     /// iterate all elements with callback function
-    /// to be removed
-    fn iterate<F> (&self, p: &mut F) -> Result<bool>
-    where F: FnMut(SliceData, SliceData) -> Result<bool> {
-        if let Some(root) = self.data() {
-            iterate_internal(
-                SliceData::from(root),
-                BuilderData::default(),
-                self.bit_len(),
-                p)
-        } else {
-            Ok(true)
-        }
-    }
-
-    /// iterate all elements with callback function
     fn iterate_slices<F> (&self, mut p: F) -> Result<bool>
     where F: FnMut(SliceData, SliceData) -> Result<bool> {
         if let Some(root) = self.data() {
             iterate_internal(
-                SliceData::from(root),
+                LabelReader::with_cell(root),
                 BuilderData::default(),
                 self.bit_len(),
-                &mut p)
+                &mut |k, v| p(k.into(), v))
         } else {
             Ok(true)
         }
@@ -580,7 +570,7 @@ where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> 
     } else if bit_len_1 == 0 { // leaf of 1 is reached
         let mut chk = false;
         let cursor_1 = cursor_1.remainder()?;
-        if !iterate_internal_raw(
+        if !iterate_internal(
             cursor_2,
             key2,
             bit_len_2,
@@ -600,7 +590,7 @@ where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> 
         debug_assert_eq!(bit_len_2, 0);
         let mut chk = false;
         let cursor_2 = cursor_2.remainder()?;
-        if !iterate_internal_raw(
+        if !iterate_internal(
             cursor_1,
             key1,
             bit_len_1,
@@ -619,7 +609,7 @@ where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> 
     }
     return Ok(true)
 }
-fn  dict_scan_diff<F>(
+fn dict_scan_diff<F>(
     cell_1: Option<Cell>,
     cell_2: Option<Cell>,
     key: BuilderData,
@@ -635,16 +625,16 @@ where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> 
             (LabelReader::new(SliceData::from(cell_1)), LabelReader::new(SliceData::from(cell_2)))
         }
         (Some(cell), None) => return iterate_internal( // only 1 leaves
-            SliceData::from(cell),
+            LabelReader::with_cell(&cell),
             key,
             bit_len_1,
-            &mut |key, cursor| func(key, Some(cursor), None)
+            &mut |key, cursor| func(key.into(), Some(cursor), None)
         ),
         (None, Some(cell)) => return iterate_internal( // only 2 leaves
-            SliceData::from(cell),
+            LabelReader::with_cell(&cell),
             key,
             bit_len_2,
-            &mut |key, cursor| func(key, None, Some(cursor))
+            &mut |key, cursor| func(key.into(), None, Some(cursor))
         ),
         _ => return Ok(true)
     };
@@ -718,23 +708,8 @@ where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> 
     }
 }
 
-
 /// iterate all elements with callback function
-fn iterate_internal<F: FnMut(SliceData, SliceData) -> Result<bool>> (
-    cursor: SliceData, 
-    key: BuilderData, 
-    bit_len: usize, 
-    found: &mut F
-) -> Result<bool> {
-    iterate_internal_raw(
-        LabelReader::new(cursor),
-        key,
-        bit_len,
-        &mut |key, value| found(key.into(), value)
-    )
-}
-    /// iterate all elements with callback function
-fn iterate_internal_raw<F: FnMut(BuilderData, SliceData) -> Result<bool>>(
+fn iterate_internal<F: FnMut(BuilderData, SliceData) -> Result<bool>>(
     mut cursor: LabelReader,
     mut key: BuilderData, 
     mut bit_len: usize, 
@@ -750,7 +725,7 @@ fn iterate_internal_raw<F: FnMut(BuilderData, SliceData) -> Result<bool>>(
         for i in 0..2 {
             let mut key = key.clone();
             key.append_bit_bool(i != 0)?;
-            if !iterate_internal_raw(cursor.next_reader(i)?, key, bit_len, found)? {
+            if !iterate_internal(cursor.next_reader(i)?, key, bit_len, found)? {
                 return Ok(false)
             }
         }
