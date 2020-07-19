@@ -17,6 +17,7 @@ use std::str;
 use std::cmp;
 use num::FromPrimitive;
 use std::fmt::{LowerHex, UpperHex};
+use serde_derive::{Serialize, Deserialize};
 
 
 pub type Result<T> = std::result::Result<T, failure::Error>;
@@ -47,7 +48,7 @@ macro_rules! fail {
     };
 }
 
-#[derive(Clone, Default, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(Clone, Default, PartialEq, Eq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct UInt256([u8; 32]);
 
 impl PartialEq<SliceData> for UInt256 {
