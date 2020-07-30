@@ -189,12 +189,14 @@ impl HashmapE {
         }
     }
     /// transform to subtree with the common prefix
+    /// to be removed
     pub fn into_subtree_with_prefix(&mut self, prefix: SliceData, gas_consumer: &mut dyn GasConsumer) -> Result<()> {
-        hashmap_into_subtree_with_prefix::<Self>(self, prefix, gas_consumer)
+        HashmapSubtree::into_subtree_with_prefix(self, &prefix, gas_consumer)
     }
     /// transform to subtree without the common prefix
+    /// to be removed
     pub fn into_subtree_without_prefix(&mut self, prefix: SliceData, gas_consumer: &mut dyn GasConsumer) -> Result<()> {
-        hashmap_into_subtree_without_prefix::<Self>(self, prefix, gas_consumer)
+        HashmapSubtree::into_subtree_without_prefix(self, &prefix, gas_consumer)
     }
     /// split to subtrees by key
     pub fn split(&self, key: &SliceData) -> Result<(Self, Self)> {
@@ -245,4 +247,5 @@ impl HashmapType for HashmapE {
 }
 
 impl HashmapRemover for HashmapE {}
+impl HashmapSubtree for HashmapE {}
 
