@@ -412,6 +412,12 @@ impl PartialEq for Cell {
     }
 }
 
+impl PartialEq<UInt256> for Cell {
+    fn eq(&self, other_hash: &UInt256) -> bool {
+        &self.repr_hash() == other_hash
+    }
+}
+
 impl Eq for Cell { }
 
 impl fmt::Debug for Cell {
@@ -564,13 +570,13 @@ impl CellData {
                 let offset = 1 + 1 + index * SHA256_SIZE;
                 self.data()[offset..offset + SHA256_SIZE].into()
             } else if let Some(hashes) = self.hashes().as_ref() {
-                hashes.get(0).map(|h| h.clone()).expect("cell is not finalized")
+                hashes.get(0).cloned().expect("cell is not finalized")
             } else {
                 panic!("cell is not finalized")
             }
         }
         else if let Some(hashes) = self.hashes().as_ref() {
-            hashes.get(index as usize).map(|h| h.clone()).expect("cell is not finalized")
+            hashes.get(index as usize).cloned().expect("cell is not finalized")
         } else {
             panic!("cell is not finalized")
         }
