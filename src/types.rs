@@ -24,26 +24,26 @@ pub type Result<T> = std::result::Result<T, failure::Error>;
 #[macro_export]
 macro_rules! error {
     ($error:literal) => {
-        failure::err_msg($error)
+        failure::err_msg(format!("{} {}:{}", $error, file!(), line!()))
     };
     ($error:expr) => {
         failure::Error::from($error)
     };
     ($fmt:expr, $($arg:tt)+) => {
-        failure::err_msg(format!($fmt, $($arg)*))
+        failure::err_msg(format!("{} {}:{}", format!($fmt, $($arg)*), file!(), line!()))
     };
 }
 
 #[macro_export]
 macro_rules! fail {
     ($error:literal) => {
-        return Err(failure::err_msg($error))
+        return Err(failure::err_msg(format!("{} {}:{}", $error, file!(), line!())))
     };
     ($error:expr) => {
         return Err(error!($error))
     };
     ($fmt:expr, $($arg:tt)*) => {
-        return Err(failure::err_msg(format!($fmt, $($arg)*)))
+        return Err(failure::err_msg(format!("{} {}:{}", format!($fmt, $($arg)*), file!(), line!())))
     };
 }
 
