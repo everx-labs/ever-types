@@ -25,7 +25,7 @@ use num::{FromPrimitive, ToPrimitive};
 
 pub const MAX_REFERENCES_COUNT: usize = 4;
 pub const MAX_DATA_BITS: usize = 1023;
-pub const MAX_LEVEL: u8 = 3;
+pub const MAX_LEVEL: usize = 3;
 pub const MAX_DEPTH: u16 = 1024;
 
 
@@ -290,11 +290,11 @@ impl Cell {
     }
 
     pub fn repr_hash(&self) -> UInt256 {
-        self.0.hash(MAX_LEVEL as usize)
+        self.0.hash(MAX_LEVEL)
     }
 
     pub fn repr_depth(&self) -> u16 {
-        self.0.depth(MAX_LEVEL as usize)
+        self.0.depth(MAX_LEVEL)
     }
 
     pub fn store_hashes(&self) -> bool {
