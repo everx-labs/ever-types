@@ -8,7 +8,7 @@ G_docker_image = null
 G_build = "none"
 G_test = "none"
 G_commit = ""
-G_binversion = "NotSet"
+G_binversion = "NotSet" 
 
 def isUpstream() {
     return currentBuild.getBuildCauses()[0]._class.toString() == 'hudson.model.Cause$UpstreamCause'
