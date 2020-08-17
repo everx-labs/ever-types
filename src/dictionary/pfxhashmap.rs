@@ -60,30 +60,30 @@ impl PfxHashmapE {
     }
     /// sets value as SliceData
     pub fn set(&mut self, key: SliceData, value: &SliceData) -> Leaf {
-        self.hashmap_set_with_mode::<Self>(key, value, &mut 0, ADD | REPLACE)
+        self.hashmap_set_with_mode(key, value, &mut 0, ADD | REPLACE)
     }
     pub fn set_with_gas(&mut self, key: SliceData, value: &SliceData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
-        self.hashmap_set_with_mode::<Self>(key, value, gas_consumer, ADD | REPLACE)
+        self.hashmap_set_with_mode(key, value, gas_consumer, ADD | REPLACE)
     }
     pub fn replace_with_gas(&mut self, key: SliceData, value: &SliceData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
-        self.hashmap_set_with_mode::<Self>(key, value, gas_consumer, REPLACE)
+        self.hashmap_set_with_mode(key, value, gas_consumer, REPLACE)
     }
     /// sets value as reference in empty SliceData
     pub fn setref(&mut self, key: SliceData, value: &Cell) -> Leaf {
-        self.hashmap_setref_with_mode::<Self>(key, value, &mut 0, ADD | REPLACE)
+        self.hashmap_setref_with_mode(key, value, &mut 0, ADD | REPLACE)
     }
     pub fn setref_with_gas(&mut self, key: SliceData, value: &Cell, gas_consumer: &mut dyn GasConsumer) -> Leaf {
-        self.hashmap_setref_with_mode::<Self>(key, value, gas_consumer, ADD | REPLACE)
+        self.hashmap_setref_with_mode(key, value, gas_consumer, ADD | REPLACE)
     }
     pub fn replaceref_with_gas(&mut self, key: SliceData, value: &Cell, gas_consumer: &mut dyn GasConsumer) -> Leaf {
-        self.hashmap_setref_with_mode::<Self>(key, value, gas_consumer, REPLACE)
+        self.hashmap_setref_with_mode(key, value, gas_consumer, REPLACE)
     }
     /// removes item
     pub fn remove(&mut self, key: SliceData) -> Leaf {
-        self.hashmap_remove::<Self>(key, &mut 0)
+        self.hashmap_remove(key, &mut 0)
     }
     pub fn remove_with_gas(&mut self, key: SliceData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
-        self.hashmap_remove::<Self>(key, gas_consumer)
+        self.hashmap_remove(key, gas_consumer)
     }
     /// true if key is prefix of any item in PfxHashmap
     pub fn is_prefix(&self, mut key: SliceData) -> Result<bool> {
@@ -222,11 +222,22 @@ impl HashmapType for PfxHashmapE {
     -> Result<BuilderData> {
         let mut builder = hm_label(&key, max)?;
         builder.append_bit_bool(!is_leaf)?;
-        // automatically adds reference with data if space is not enought
-        if builder.checked_append_references_and_data(data).is_err() {
-            let reference = BuilderData::from_slice(data);
-            builder.append_reference(reference);
-        }
+        builder.checked_append_references_and_data(data)?;
+        Ok(builder)
+    }
+    fn make_fork(key: SliceData, bit_len: usize, left: Cell, right: Cell) -> Result<(BuilderData, SliceData)> {
+        let mut builder = hm_label(&key, bit_len)?;
+        let mut remainder = BuilderData::new();
+        remainder.append_bit_one()?;
+        remainder.checked_append_reference(left)?;
+        remainder.checked_append_reference(right)?;
+        builder.append_builder(&remainder)?;
+        Ok((builder, remainder.into()))
+    }
+    fn make_leaf(key: SliceData, bit_len: usize, value: &SliceData) -> Result<BuilderData> {
+        let mut builder = hm_label(&key, bit_len)?;
+        builder.checked_append_references_and_data(value)?;
+        builder.append_bit_zero()?;
         Ok(builder)
     }
     fn is_fork(slice: &mut SliceData) -> Result<bool> {

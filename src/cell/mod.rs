@@ -253,6 +253,22 @@ impl Cell {
         self.0.level() as usize + 1
     }
 
+    pub fn count_cells(&self, max: usize) -> Result<usize> {
+        let mut count = 0;
+        let mut queue = vec!(self.clone());
+        while let Some(cell) = queue.pop() {
+            if count >= max {
+                fail!("count exceeds max {}", max)
+            }
+            count += 1;
+            let count = cell.references_count();
+            for i in 0..count {
+                queue.push(cell.reference(i)?);
+            }
+        }
+        Ok(count)
+    }
+
     pub fn level_mask(&self) -> LevelMask {
         self.0.level_mask()
     }

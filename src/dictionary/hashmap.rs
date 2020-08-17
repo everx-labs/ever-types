@@ -108,29 +108,29 @@ impl HashmapE {
     }
     /// sets value as SliceData
     pub fn set(&mut self, key: SliceData, value: &SliceData) -> Leaf {
-        self.hashmap_set_with_mode::<Self>(key, value, &mut 0, ADD | REPLACE)
+        self.hashmap_set_with_mode(key, value, &mut 0, ADD | REPLACE)
     }
     pub fn set_with_gas(&mut self, key: SliceData, value: &SliceData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
-        self.hashmap_set_with_mode::<Self>(key, value, gas_consumer, ADD | REPLACE)
+        self.hashmap_set_with_mode(key, value, gas_consumer, ADD | REPLACE)
     }
     pub fn replace_with_gas(&mut self, key: SliceData, value: &SliceData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
-        self.hashmap_set_with_mode::<Self>(key, value, gas_consumer, REPLACE)
+        self.hashmap_set_with_mode(key, value, gas_consumer, REPLACE)
     }
     pub fn add_with_gas(&mut self, key: SliceData, value: &SliceData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
-        self.hashmap_set_with_mode::<Self>(key, value, gas_consumer, ADD)
+        self.hashmap_set_with_mode(key, value, gas_consumer, ADD)
     }
     /// sets value as reference
     pub fn setref(&mut self, key: SliceData, value: &Cell) -> Leaf {
-        self.hashmap_setref_with_mode::<Self>(key, value, &mut 0, ADD | REPLACE)
+        self.hashmap_setref_with_mode(key, value, &mut 0, ADD | REPLACE)
     }
     pub fn setref_with_gas(&mut self, key: SliceData, value: &Cell, gas_consumer: &mut dyn GasConsumer) -> Leaf {
-        self.hashmap_setref_with_mode::<Self>(key, value, gas_consumer, ADD | REPLACE)
+        self.hashmap_setref_with_mode(key, value, gas_consumer, ADD | REPLACE)
     }
     pub fn replaceref_with_gas(&mut self, key: SliceData, value: &Cell, gas_consumer: &mut dyn GasConsumer) -> Leaf {
-        self.hashmap_setref_with_mode::<Self>(key, value, gas_consumer, REPLACE)
+        self.hashmap_setref_with_mode(key, value, gas_consumer, REPLACE)
     }
     pub fn addref_with_gas(&mut self, key: SliceData, value: &Cell, gas_consumer: &mut dyn GasConsumer) -> Leaf {
-        self.hashmap_setref_with_mode::<Self>(key, value, gas_consumer, ADD)
+        self.hashmap_setref_with_mode(key, value, gas_consumer, ADD)
     }
     /// gets next/this or previous leaf
     pub fn find_leaf(
@@ -157,11 +157,11 @@ impl HashmapE {
     }
     /// removes item
     pub fn remove(&mut self, key: SliceData) -> Leaf {
-        self.hashmap_remove::<Self>(key, &mut 0)
+        self.hashmap_remove(key, &mut 0)
     }
     /// removes item spending gas
     pub fn remove_with_gas(&mut self, key: SliceData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
-        self.hashmap_remove::<Self>(key, gas_consumer)
+        self.hashmap_remove(key, gas_consumer)
     }
     /// gets item with minimal key
     pub fn get_min(&self, signed: bool, gas_consumer: &mut dyn GasConsumer) -> Result<Option<(BuilderData, SliceData)>> {
@@ -238,4 +238,13 @@ impl HashmapType for HashmapE {
 
 impl HashmapRemover for HashmapE {}
 impl HashmapSubtree for HashmapE {}
+
+impl IntoIterator for &HashmapE {
+    type Item = <HashmapIterator<HashmapE> as std::iter::Iterator>::Item;
+    type IntoIter = HashmapIterator<HashmapE>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
 

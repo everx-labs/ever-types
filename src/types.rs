@@ -20,6 +20,8 @@ use std::fmt::{LowerHex, UpperHex};
 
 
 pub type Result<T> = std::result::Result<T, failure::Error>;
+pub type Failure = Option<failure::Error>;
+pub type Status = Result<()>;
 
 #[macro_export]
 macro_rules! error {

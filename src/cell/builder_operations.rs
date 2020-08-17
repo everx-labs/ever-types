@@ -45,7 +45,6 @@ impl BuilderData {
         self.references().len() + count <= MAX_REFERENCES_COUNT
     }
 
-    // TODO: check here cyclic appending
     pub fn checked_append_reference(&mut self, cell: Cell) -> Result<&mut Self> {
         if self.references().len() >= MAX_REFERENCES_COUNT {
             fail!(ExceptionCode::CellOverflow)
