@@ -41,6 +41,10 @@ macro_rules! fail {
     ($error:literal) => {
         return Err(failure::err_msg(format!("{} {}:{}", $error, file!(), line!())))
     };
+    // uncomment to explicit panic for any ExceptionCode
+    (ExceptionCode::CellOverrflow) => {
+        panic!("{}", error!(ExceptionCode::CellUnderflow))
+    };
     ($error:expr) => {
         return Err(error!($error))
     };

@@ -207,9 +207,6 @@ impl HashmapType for HashmapE {
     fn check_key(bit_len: usize, key: &SliceData) -> bool {
         bit_len == key.remaining_bits()
     }
-    fn make_cell_with_label(key: SliceData, max: usize) -> Result<BuilderData> {
-        hm_label(&key, max)
-    }
     fn make_cell_with_label_and_data(key: SliceData, max: usize, _is_leaf: bool, data: &SliceData)
     -> Result<BuilderData> {
         let mut builder = hm_label(&key, max)?;

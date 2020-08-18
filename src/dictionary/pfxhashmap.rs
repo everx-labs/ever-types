@@ -225,17 +225,20 @@ impl HashmapType for PfxHashmapE {
         builder.checked_append_references_and_data(data)?;
         Ok(builder)
     }
-    fn make_fork(key: SliceData, bit_len: usize, left: Cell, right: Cell) -> Result<(BuilderData, SliceData)> {
-        let mut builder = hm_label(&key, bit_len)?;
+    fn make_fork(key: &SliceData, bit_len: usize, mut left: Cell, mut right: Cell, swap: bool) -> Result<(BuilderData, SliceData)> {
+        let mut builder = hm_label(key, bit_len)?;
         let mut remainder = BuilderData::new();
         remainder.append_bit_one()?;
+        if swap {
+            std::mem::swap(&mut left, &mut right);
+        }
         remainder.checked_append_reference(left)?;
         remainder.checked_append_reference(right)?;
         builder.append_builder(&remainder)?;
         Ok((builder, remainder.into()))
     }
-    fn make_leaf(key: SliceData, bit_len: usize, value: &SliceData) -> Result<BuilderData> {
-        let mut builder = hm_label(&key, bit_len)?;
+    fn make_leaf(key: &SliceData, bit_len: usize, value: &SliceData) -> Result<BuilderData> {
+        let mut builder = hm_label(key, bit_len)?;
         builder.checked_append_references_and_data(value)?;
         builder.append_bit_zero()?;
         Ok(builder)

@@ -375,23 +375,30 @@ pub trait HashmapType {
             false => fail!("Bad key {} for dict", key)
         }
     }
-    fn make_cell_with_label(key: SliceData, max: usize) -> Result<BuilderData>;
+    fn make_cell_with_label(key: SliceData, max: usize) -> Result<BuilderData> { hm_label(&key, max) }
     fn make_cell_with_label_and_data(key: SliceData, max: usize, is_leaf: bool, data: &SliceData) -> Result<BuilderData>;
-    fn make_edge(key: SliceData, bit_len: usize, _is_leaf: bool, data: &SliceData) -> Result<BuilderData> {
-        let mut builder = hm_label(&key, bit_len)?;
-        builder.checked_append_references_and_data(data)?;
-        Ok(builder)
+    fn make_edge(key: &SliceData, bit_len: usize, is_left: bool, mut next: SliceData) -> Result<BuilderData> {
+        let mut next_bit_len = bit_len.checked_sub(key.remaining_bits() + 1)
+            .ok_or_else(|| error!(ExceptionCode::CellUnderflow))?;
+        let mut label = BuilderData::from_slice(&key);
+        label.append_bit_bool(!is_left)?;
+        label = next.get_label_raw(&mut next_bit_len, label)?;
+        let is_leaf = Self::is_leaf(&mut next);
+        Self::make_cell_with_label_and_data(label.into(), bit_len, is_leaf, &next)
     }
-    fn make_fork(key: SliceData, bit_len: usize, left: Cell, right: Cell) -> Result<(BuilderData, SliceData)> {
-        let mut builder = hm_label(&key, bit_len)?;
+    fn make_fork(key: &SliceData, bit_len: usize, mut left: Cell, mut right: Cell, swap: bool) -> Result<(BuilderData, SliceData)> {
+        let mut builder = hm_label(key, bit_len)?;
         let mut remainder = BuilderData::new();
+        if swap {
+            std::mem::swap(&mut left, &mut right);
+        }
         remainder.checked_append_reference(left)?;
         remainder.checked_append_reference(right)?;
         builder.append_builder(&remainder)?;
         Ok((builder, remainder.into()))
     }
-    fn make_leaf(key: SliceData, bit_len: usize, value: &SliceData) -> Result<BuilderData> {
-        let mut builder = hm_label(&key, bit_len)?;
+    fn make_leaf(key: &SliceData, bit_len: usize, value: &SliceData) -> Result<BuilderData> {
+        let mut builder = hm_label(key, bit_len)?;
         builder.checked_append_references_and_data(value)?;
         Ok(builder)
     }
@@ -432,6 +439,22 @@ pub trait HashmapType {
         } else {
             Ok(None)
         }
+    }
+
+    fn hashmap_get_new(&self, key: SliceData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
+        let bit_len = self.bit_len();
+        Self::check_key_fail(bit_len, &key)?;
+        if let Some(root) = self.data() {
+            let mut cursor = LabelReader::new(gas_consumer.load_cell(root.clone())?);
+            let (_key, rem_prefix) = down_by_tree::<Self>(&key, &mut cursor, self.bit_len(), gas_consumer)?;
+            if rem_prefix.is_none() {
+                let mut remainder = cursor.remainder()?;
+                if Self::is_leaf(&mut remainder) {
+                    return Ok(Some(remainder))
+                }
+            }
+        }
+        Ok(None)
     }
 
     fn hashmap_set_with_mode(
@@ -554,7 +577,7 @@ pub trait HashmapType {
     }
     // merge
     fn hashmap_merge(&mut self, other: &Self, key: &SliceData) -> Result<()> {
-        let mut bit_len = self.bit_len();
+        let bit_len = self.bit_len();
         if bit_len != other.bit_len() || key.remaining_bits() > bit_len {
             return Ok(()) // fail!("data in hashmaps do not correspond each other or key too long")
         }
@@ -585,10 +608,11 @@ pub trait HashmapType {
                 }
                 let is_leaf1 = Self::is_leaf(&mut cursor);
                 let is_leaf2 = Self::is_leaf(&mut other);
-                let mut root = Self::make_cell_with_label(prefix, bit_len)?;
-                bit_len = bit_len.checked_sub(root.length_in_bits() + 1).ok_or(ExceptionCode::CellUnderflow)?;
-                root.append_reference(Self::make_cell_with_label_and_data(left, bit_len, is_leaf1, &cursor)?);
-                root.append_reference(Self::make_cell_with_label_and_data(right, bit_len, is_leaf2, &other)?);
+
+                let next_bit_len = bit_len.checked_sub(prefix.remaining_bits() + 1).ok_or(ExceptionCode::CellUnderflow)?;
+                let left = Self::make_cell_with_label_and_data(left, next_bit_len, is_leaf1, &cursor)?;
+                let right = Self::make_cell_with_label_and_data(right, next_bit_len, is_leaf2, &other)?;
+                let (root, _) = Self::make_fork(&prefix, bit_len, left.into(), right.into(), false)?;
                 *self.data_mut() = Some(root.into());
             }
             _ => fail!("Cannot merge")
@@ -935,68 +959,57 @@ fn slice_edge<T: HashmapType + ?Sized>(
     let length = bit_len.checked_sub(prefix.remaining_bits() + 1).ok_or(ExceptionCode::CellUnderflow)?;
     let is_leaf = T::is_leaf(&mut slice);
     // Remainder of tree
-    let mut existing_cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(label, length, is_leaf, &slice)?)?;
+    let existing_cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(label, length, is_leaf, &slice)?)?;
     // Leaf for fork
-    let mut another_cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(key, length, true, leaf)?)?;
-    if label_bit {
-        std::mem::swap(&mut existing_cell, &mut another_cell);
-    }
-    let (builder, _remainder) = T::make_fork(prefix, bit_len, existing_cell, another_cell)?;
+    let another_cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(key, length, true, leaf)?)?;
+    let (builder, _remainder) = T::make_fork(&prefix, bit_len, existing_cell, another_cell, label_bit)?;
     Ok(builder)
 }
 
 // remove method
 fn remove_node<T: HashmapType + ?Sized>(
-    cell: &mut Cell,
+    cell_opt: &mut Option<Cell>,
     bit_len: usize,
-    prefix: SliceData,
-    mut key: SliceData,
-    gas_consumer: &mut dyn GasConsumer
-) -> Leaf {
-    if cell.references_count() != 2 {
-        debug_assert!(false);
-        return Ok(None)
-    }
-    let length = bit_len.checked_sub(prefix.remaining_bits() + 1).ok_or(ExceptionCode::CellUnderflow)?;
-    let next_index = key.get_next_bit_int()?;
-    let mut leaf = gas_consumer.load_cell(cell.reference(next_index)?)?;
-    let label = leaf.get_label(length)?;
-    if label == key && T::is_leaf(&mut leaf) {
-        let result = Some(leaf);
-        let ref mut fork = gas_consumer.load_cell(cell.reference(1 - next_index)?)?;
-        let mut label = BuilderData::from_slice(&prefix);
-        label.append_bit_bool(next_index == 0)?;
-        label.append_bytestring(&fork.get_label(length)?)?; // with fork bit
-        let is_leaf = T::is_leaf(fork);
-        *cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(
-            label.into(), bit_len, is_leaf, fork
-        )?)?;
-        return Ok(result);
-    }
-    let mut references = vec![cell.reference(0)?.clone(), cell.reference(1)?.clone()];
-    let result = remove_fork::<T>(&mut references[next_index], length, label, key, gas_consumer);
-
-    let mut builder = BuilderData::new();
-    builder.append_raw(cell.data(), cell.bit_length())?;
-    for r in references {
-        builder.checked_append_reference(r)?;
-    }
-    *cell = gas_consumer.finalize_cell(builder)?;
-
-    result
-}
-// label is empty or fully in key
-fn remove_fork<T: HashmapType + ?Sized>(
-    cell: &mut Cell,
-    bit_len: usize,
-    label: SliceData,
     key: SliceData,
     gas_consumer: &mut dyn GasConsumer
 ) -> Leaf {
-    if let (prefix, None, Some(remainder)) = SliceData::common_prefix(&label, &key) {
-        remove_node::<T>(cell, bit_len, prefix.unwrap_or_default(), remainder, gas_consumer)
-    } else {
-        Ok(None)
+    let mut cursor = match cell_opt {
+        Some(cell) => gas_consumer.load_cell(cell.clone())?,
+        _ => return Ok(None)
+    };
+    let label = cursor.get_label(bit_len)?;
+    match SliceData::common_prefix(&label, &key) {
+        (_, None, Some(mut reminder)) => {
+            if let Some(next_bit_len) = bit_len.checked_sub(1 + label.remaining_bits()) {
+                if T::is_fork(&mut cursor)? {
+                    let next_index = reminder.get_next_bit_int()?;
+                    let mut next_cell = Some(cursor.reference(next_index)?);
+                    let result = remove_node::<T>(&mut next_cell, next_bit_len, reminder, gas_consumer)?;
+                    if result.is_some() {
+                        let other = cursor.reference(1 - next_index)?;
+                        if let Some(next) = next_cell {
+                            let (builder, _remainder) = T::make_fork(&label, bit_len, next, other, next_index == 1)?;
+                            *cell_opt = Some(gas_consumer.finalize_cell(builder)?)
+                        } else {
+                            let builder = T::make_edge(&label, bit_len, next_index == 1, gas_consumer.load_cell(other)?)?;
+                            *cell_opt = Some(gas_consumer.finalize_cell(builder)?)
+                        }
+                    }
+                    return Ok(result)
+                }
+            }
+            fail!(ExceptionCode::CellUnderflow)
+        }
+        (_, None, None) => {
+            if T::is_leaf(&mut cursor) {
+                *cell_opt = None;
+                Ok(Some(cursor))
+            } else {
+                fail!(ExceptionCode::CellUnderflow)
+            }
+        }
+        (_, Some(_), Some(_)) => Ok(None),
+        (_, Some(_), _) => fail!(ExceptionCode::CellUnderflow)
     }
 }
 
@@ -1012,22 +1025,7 @@ pub trait HashmapRemover: HashmapType {
     fn hashmap_remove(&mut self, key: SliceData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
         let bit_len = self.bit_len();
         Self::check_key_fail(bit_len, &key)?;
-        let mut root = match self.data().cloned() {
-            Some(root) => root,
-            _ => return Ok(None)
-        };
-        let mut leaf = gas_consumer.load_cell(root.clone())?;
-        let label = leaf.get_label(bit_len)?;
-        let result;
-        *self.data_mut() = if label == key && Self::is_leaf(&mut leaf) {
-            // last node
-            result = Ok(Some(leaf));
-            None
-        } else {
-            result = remove_fork::<Self>(&mut root, bit_len, label, key, gas_consumer);
-            Some(root)
-        };
-        result
+        remove_node::<Self>(self.data_mut(), bit_len, key, gas_consumer)
     }
     fn hashmap_filter<F>(&mut self, mut func: F) -> Result<()>
     where F: FnMut(&BuilderData, SliceData) -> Result<HashmapFilterResult> {
@@ -1099,7 +1097,7 @@ where
         if let Some((left, _, _)) = next.pop() { // prepare new fork
             let mut label = SliceData::from(key);
             label.move_by(key_length)?;
-            let (builder, remainder) = T::make_fork(label, this_bit_len, left, right)?;
+            let (builder, remainder) = T::make_fork(&label, this_bit_len, left, right, false)?;
             *cell_opt = Some(builder.into());
             return Ok((true, Some(remainder)))
         } else { // replace fork with edge
