@@ -12,11 +12,9 @@
 */
 
 use crate::cell::SliceData;
-use std::fmt;
-use std::str;
-use std::cmp;
 use num::FromPrimitive;
-use std::fmt::{LowerHex, UpperHex};
+use sha2::Digest;
+use std::{fmt, fmt::{LowerHex, UpperHex}, cmp, str};
 
 
 pub type Result<T> = std::result::Result<T, failure::Error>;
@@ -42,9 +40,9 @@ macro_rules! fail {
         return Err(failure::err_msg(format!("{} {}:{}", $error, file!(), line!())))
     };
     // uncomment to explicit panic for any ExceptionCode
-    (ExceptionCode::CellOverrflow) => {
-        panic!("{}", error!(ExceptionCode::CellUnderflow))
-    };
+    // (ExceptionCode::CellUnderflow) => {
+    //     panic!("{}", error!(ExceptionCode::CellUnderflow))
+    // };
     ($error:expr) => {
         return Err(error!($error))
     };
@@ -84,9 +82,25 @@ impl UInt256 {
         hex::encode(self.0)
     }
 
-    pub fn max() -> Self {
-        Self::from([0xFF; 32])
+    pub fn from_str(value: &str) -> Result<Self> {
+        if value.len() != 64 {
+            fail!("invalid account ID string length (64 expected)")
+        } else {
+            let bytes = hex::decode(value)?;
+            Ok(UInt256::from(bytes))
+        }
     }
+
+    pub fn calc_file_hash(bytes: &[u8]) -> Self {
+        UInt256::from(sha2::Sha256::digest(bytes).as_slice())
+    }
+
+    pub fn max() -> Self {
+        UInt256([0xFF; 32])
+    }
+
+    pub const MIN: UInt256 = UInt256([0; 32]);
+    pub const MAX: UInt256 = UInt256([0xFF; 32]);
 }
 
 impl From<[u8;32]> for UInt256 {
@@ -158,22 +172,6 @@ impl UpperHex for UInt256 {
             write!(f, "0x")?;
         }
         write!(f, "{}", hex::encode_upper(&self.0))
-    }
-}
-
-impl str::FromStr for UInt256 {
-    type Err = failure::Error;
-    fn from_str(value: &str) -> Result<Self> {
-        if value.len() != 64 {
-            fail!(ParseAccountIdError::SizeError)
-        } else {
-            let mut data: [u8;32] = [0;32];
-            for i in 0..data.len() {
-                let hex = &value[2*i..2+2*i];
-                data[i] = u8::from_str_radix(hex, 16).map_err(|_| ParseAccountIdError::HexError)?;
-            }
-            Ok(UInt256::from(data))
-        }
     }
 }
 
@@ -275,29 +273,6 @@ impl ExceptionCode {
         FromPrimitive::from_usize(number)
     }
 }
-
-#[derive(Debug, failure::Fail)]
-pub enum ParseAccountIdError {
-    #[fail(display = "invalid account ID string length (64 expected)")]
-    SizeError,
-    #[fail(display = "invalid character while parsing account ID hex string")]
-    HexError
-}
-
-/*
-impl fmt::Display for ParseAccountIdError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                ParseAccountIdError::SizeError => "invalid string length (64 expected)",
-                ParseAccountIdError::HexError => "invalid character while parsing hex string"
-            }
-        )
-    }
-}
-*/
 
 pub trait ByteOrderRead {
     fn read_be_uint(&mut self, bytes: usize) -> std::io::Result<usize>;

@@ -1027,6 +1027,9 @@ pub trait HashmapRemover: HashmapType {
         Self::check_key_fail(bit_len, &key)?;
         remove_node::<Self>(self.data_mut(), bit_len, key, gas_consumer)
     }
+    fn remove(&mut self, key: SliceData) -> Leaf {
+        self.hashmap_remove(key, &mut 0)
+    }
     fn hashmap_filter<F>(&mut self, mut func: F) -> Result<()>
     where F: FnMut(&BuilderData, SliceData) -> Result<HashmapFilterResult> {
         let bit_len = self.bit_len();
@@ -1107,8 +1110,6 @@ where
             let mut builder = T::make_cell_with_label(label, this_bit_len)?;
             if let Some(ref remainder) = next_remainder {
                 builder.checked_append_references_and_data(remainder)?;
-            } else {
-                panic!("should be")
             }
             *cell_opt = Some(builder.into());
             return Ok((true, next_remainder))
