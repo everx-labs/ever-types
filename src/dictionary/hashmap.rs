@@ -67,19 +67,6 @@ impl HashmapE {
             None => fail!(ExceptionCode::CellUnderflow)
         }
     }
-    /// serialize hashmapE to cell
-    pub fn write_to_cell(&self, cell: &mut BuilderData) -> Result<()> {
-        match self.data() {
-            Some(root) => {
-                cell.append_bit_one()?;
-                cell.append_reference_cell(root.clone());
-            }
-            None => {
-                cell.append_bit_zero()?;
-            }
-        }
-        Ok(())
-    }
     /// deserialize not empty root
     pub fn read_hashmap_root(&mut self, slice: &mut SliceData) -> Result<()> {
         let mut root = slice.clone();

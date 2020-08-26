@@ -214,6 +214,30 @@ impl LabelReader {
             Ok(self.get_label_same(&mut max, BuilderData::default())?.into())
         }
     }
+    pub fn skip_label(&mut self, max: &mut usize) -> Result<()> {
+        if self.already_read {
+            fail!("label already read!")
+        }
+        self.already_read = true;
+        let mut len = 0;
+        // note: in case of max is 0 it is normal to read bits from the slice
+        // but if you mistakely pass 0 to this function it causes undefined behavoiur
+        if self.cursor.is_empty() {
+        } else if !self.cursor.get_next_bit()? {
+            while self.cursor.get_next_bit()? {
+                len += 1;
+            }
+            self.cursor.move_by(len)?;
+        } else if !self.cursor.get_next_bit()? {
+            len = self.cursor.get_next_size(*max)? as usize;
+            self.cursor.move_by(len)?;
+        } else {
+            self.cursor.get_next_bit()?;
+            len = self.cursor.get_next_size(*max)? as usize;
+        }
+        *max = max.checked_sub(len).ok_or(ExceptionCode::CellUnderflow)?;
+        Ok(())
+    }
     pub fn is_fork<T: HashmapType + ?Sized>(&mut self) -> Result<bool> {
         T::is_fork(&mut self.cursor)
     }
@@ -376,7 +400,11 @@ pub trait HashmapType {
         }
     }
     fn make_cell_with_label(key: SliceData, max: usize) -> Result<BuilderData> { hm_label(&key, max) }
-    fn make_cell_with_label_and_data(key: SliceData, max: usize, is_leaf: bool, data: &SliceData) -> Result<BuilderData>;
+    fn make_cell_with_label_and_data(key: SliceData, max: usize, _is_leaf: bool, data: &SliceData) -> Result<BuilderData> {
+        let mut builder = hm_label(&key, max)?;
+        builder.checked_append_references_and_data(data)?;
+        Ok(builder)
+    }
     fn make_edge(key: &SliceData, bit_len: usize, is_left: bool, mut next: SliceData) -> Result<BuilderData> {
         let mut next_bit_len = bit_len.checked_sub(key.remaining_bits() + 1)
             .ok_or_else(|| error!(ExceptionCode::CellUnderflow))?;
@@ -508,21 +536,27 @@ pub trait HashmapType {
 
     /// returns count of objects in tree - don't use it - try is_empty()
     fn len(&self) -> Result<usize> {
-        let mut count = 0;
-        self.iterate_slices(|_, _| {
-            count += 1;
-            Ok(true)
-        })?;
-        Ok(count)
+        match self.data() {
+            Some(root) => {
+                let mut len = 0;
+                let cursor = LabelReader::with_cell(root);
+                count_internal::<Self>(cursor, self.bit_len(), &mut len, std::usize::MAX)?;
+                Ok(len)
+            }
+            None => Ok(0)
+        }
     }
     /// counts elements to max counter - can be used as validate
     fn count(&self, max: usize) -> Result<usize> {
-        let mut count = 0;
-        self.iterate_slices(|_, _| {
-            count += 1;
-            Ok(count < max)
-        })?;
-        Ok(count)
+        match self.data() {
+            Some(root) => {
+                let mut len = 0;
+                let cursor = LabelReader::with_cell(root);
+                count_internal::<Self>(cursor, self.bit_len(), &mut len, max)?;
+                Ok(len)
+            }
+            None => Ok(0)
+        }
     }
     /// determines if hashmap contains one element
     fn is_single(&self) -> Result<Option<(BuilderData, SliceData)>> {
@@ -821,6 +855,28 @@ where
         }
         Ok(true)
     }
+}
+
+/// count all elements with callback function
+fn count_internal<T: HashmapType + ?Sized>(
+    mut cursor: LabelReader,
+    mut bit_len: usize,
+    len: &mut usize,
+    max: usize,
+) -> Result<bool> {
+    if !cursor.already_read() {
+        cursor.skip_label(&mut bit_len)?;
+    }
+    match bit_len.checked_sub(1) {
+        Some(bit_len) => for i in 0..2 {
+            if !count_internal::<T>(cursor.next_reader::<T>(i, &mut 0)?, bit_len, len, max)? {
+                return Ok(false)
+            }
+        }
+        None if *len == max => return Ok(false),
+        None => *len += 1
+    }
+    Ok(true)
 }
 
 /// Puts element to required branch by first bit
