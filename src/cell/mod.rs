@@ -14,13 +14,12 @@
 use crate::{error, fail};
 use crate::types::{ExceptionCode, Result, UInt256, ByteOrderRead};
 use crate::cells_serialization::{SHA256_SIZE, BagOfCells};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock, Weak};
 use std::collections::HashSet;
 use std::fmt;
 use std::ops::{BitOr, BitOrAssign};
 use sha2::{Sha256, Digest};
 use std::cmp::{max, min};
-use std::ops::Deref;
 use num::{FromPrimitive, ToPrimitive};
 
 pub const MAX_REFERENCES_COUNT: usize = 4;
@@ -562,16 +561,16 @@ impl CellData {
         self.store_hashes
     }
 
-    pub fn hashes(&self) -> &Option<Vec<UInt256>> {
-        &self.hashes
+    pub fn hashes(&self) -> Option<&Vec<UInt256>> {
+        self.hashes.as_ref()
     }
 
     fn set_hashes(&mut self, hashes: Option<Vec<UInt256>>) {
         self.hashes = hashes
     }
 
-    pub fn depths(&self) -> &Option<Vec<u16>> {
-        &self.depths
+    pub fn depths(&self) -> Option<&Vec<u16>> {
+        self.depths.as_ref()
     }
 
     fn set_depths(&mut self, depths: Option<Vec<u16>>) {
@@ -588,13 +587,13 @@ impl CellData {
             } else if let Some(hashes) = self.hashes().as_ref() {
                 hashes.get(0).cloned().expect("cell is not finalized")
             } else {
-                panic!("cell is not finalized")
+                unreachable!("cell is not finalized")
             }
         }
         else if let Some(hashes) = self.hashes().as_ref() {
             hashes.get(index as usize).cloned().expect("cell is not finalized")
         } else {
-            panic!("cell is not finalized")
+            unreachable!("cell is not finalized")
         }
     }
 
@@ -713,6 +712,7 @@ pub struct DataCell {
 impl DataCell {
 
     pub fn new() -> DataCell {
+        // safe because of creating empty Cell
         Self::with_params(vec!(), vec!(), CellType::Ordinary, 0, None, None).unwrap()
     }
 
@@ -859,10 +859,10 @@ impl DataCell {
         }
 
         if self.store_hashes() {
-            if &depths != self.depths().as_ref().expect("cell have to store depths") {
+            if Some(&depths) != self.depths() {
                 fail!(ExceptionCode::FatalError)
             }
-            if &hashes != self.hashes().as_ref().expect("cell have to store hashes") {
+            if Some(&hashes) != self.hashes() {
                 fail!(ExceptionCode::FatalError)
             }
         } else {
@@ -876,16 +876,16 @@ impl DataCell {
         &self.cell_data
     }
 
-    fn hashes(&self) -> &Option<Vec<UInt256>> {
-        &self.cell_data.hashes()
+    fn hashes(&self) -> Option<&Vec<UInt256>> {
+        self.cell_data.hashes()
     }
 
     fn set_hashes(&mut self, hashes: Option<Vec<UInt256>>) {
         self.cell_data.set_hashes(hashes)
     }
 
-    fn depths(&self) -> &Option<Vec<u16>> {
-        &self.cell_data.depths()
+    fn depths(&self) -> Option<&Vec<u16>> {
+        self.cell_data.depths()
     }
 
     fn set_depths(&mut self, depths: Option<Vec<u16>>) {
@@ -936,26 +936,29 @@ impl CellImpl for DataCell {
 }
 
 #[derive(Clone)]
-pub struct UsageCell {
+struct UsageCell {
     cell: Cell,
-    visited: Arc<Mutex<HashSet<UInt256>>>
+    visited: Weak<RwLock<HashSet<UInt256>>>
 }
 
 impl UsageCell {
-    pub fn with_cell(cell: Cell) -> Self {
-        UsageCell {
-            cell,
-            visited: Arc::new(Mutex::new(HashSet::new())),
+    fn visit(&self) -> bool {
+        if let Some(visited) = self.visited.upgrade() {
+            match visited.try_write() {
+                Ok(mut visited) => {
+                    visited.insert(self.cell.repr_hash());
+                    return true
+                }
+                Err(err) => debug_assert!(false, "usage tree write error {}", err)
+            }
         }
-    }
-    pub fn visited<'a>(&'a self) -> impl 'a + Deref<Target = HashSet<UInt256>> {
-        self.visited.lock().unwrap()
+        false
     }
 }
 
 impl CellImpl for UsageCell {
     fn data(&self) -> &[u8] {
-        self.visited.lock().unwrap().insert(self.cell.repr_hash());
+        self.visit();
         self.cell.data()
     }
 
@@ -972,15 +975,18 @@ impl CellImpl for UsageCell {
     }
 
     fn reference(&self, index: usize) -> Result<Cell> {
-        self.visited.lock().unwrap().insert(self.cell.repr_hash());
-        Ok(
-            Cell::with_cell_impl(
-                UsageCell {
-                    cell: self.cell.reference(index)?,
-                    visited: self.visited.clone(),
-                }
+        if self.visit() {
+            Ok(
+                Cell::with_cell_impl(
+                    UsageCell {
+                        cell: self.cell.reference(index)?,
+                        visited: self.visited.clone(),
+                    }
+                )
             )
-        )
+        } else {
+            self.cell.reference(index)
+        }
     }
 
     fn cell_type(&self) -> CellType {
@@ -1062,26 +1068,38 @@ impl CellImpl for VirtualCell {
 }
 
 pub struct UsageTree {
-    root: Arc<UsageCell>
+    root: Cell,
+    visited: Arc<RwLock<HashSet<UInt256>>>
 }
 
 impl UsageTree {
     pub fn with_root(root: Cell) -> Self {
-        Self {
-            root: Arc::new(UsageCell::with_cell(root)) 
-        }
+        let visited = Arc::new(RwLock::new(HashSet::new()));
+        let root = Cell::with_cell_impl_arc(Arc::new(UsageCell {
+            cell: root,
+            visited: Arc::downgrade(&visited)
+        }));
+        Self { root, visited }
     }
 
     pub fn root_slice(&self) -> SliceData {
-        SliceData::from(Cell::with_cell_impl_arc(self.root.clone()))
+        SliceData::from(self.root.clone())
     }
 
     pub fn root_cell(&self) -> Cell {
-        Cell::with_cell_impl_arc(self.root.clone())
+        self.root.clone()
     }
-
-    pub fn visited<'a>(&'a self) -> impl 'a + Deref<Target = HashSet<UInt256>> {
-        self.root.visited()
+    /// destroy usage tree and free all cells
+    pub fn visited(self) -> HashSet<UInt256> {
+        // safe because Arc is used to share weak pointers, nobody must clone this Arc
+        Arc::try_unwrap(self.visited).unwrap().into_inner().unwrap()
+    }
+    pub fn contains(&self, hash: &UInt256) -> bool {
+        match self.visited.try_read() {
+            Ok(visited) => return visited.contains(hash),
+            Err(err) => debug_assert!(false, "usage tree read error {}", err)
+        }
+        false
     }
 }
 
