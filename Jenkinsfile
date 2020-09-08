@@ -296,20 +296,22 @@ pipeline {
         stage('Versioning') {
             steps {
                 script {
-                    withCredentials([file(credentialsId: 'ovh-s3-creds', variable: 'ovhs3')]) {
-                        sh """
-                            export AWS_CONFIG_FILE=\$(echo \"\${ovhs3}\")
-                            aws s3 cp s3://sdkbinaries.tonlabs.io/version.json ./version.json
-                        """
-                        if(params.common_version) {
-                            G_binversion = sh (script: "node tonVersion.js --set ${params.common_version} .", returnStdout: true).trim()
-                        } else {
-                            G_binversion = sh (script: "node tonVersion.js .", returnStdout: true).trim()
+                    lock('bucket') {
+                        withCredentials([file(credentialsId: 'ovh-s3-creds', variable: 'ovhs3')]) {
+                            sh """
+                                export AWS_CONFIG_FILE=\$(echo \"\${ovhs3}\")
+                                aws s3 cp s3://sdkbinaries.tonlabs.io/version.json ./version.json
+                            """
+                            if(params.common_version) {
+                                G_binversion = sh (script: "node tonVersion.js --set ${params.common_version} .", returnStdout: true).trim()
+                            } else {
+                                G_binversion = sh (script: "node tonVersion.js .", returnStdout: true).trim()
+                            }
+                            sh """
+                                export AWS_CONFIG_FILE=\$(echo \"\${ovhs3}\")
+                                aws s3 cp ./version.json s3://sdkbinaries.tonlabs.io/version.json
+                            """
                         }
-                        sh """
-                            export AWS_CONFIG_FILE=\$(echo \"\${ovhs3}\")
-                            aws s3 cp ./version.json s3://sdkbinaries.tonlabs.io/version.json
-                        """
                     }
                 }
             }
