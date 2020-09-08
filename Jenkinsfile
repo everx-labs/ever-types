@@ -300,7 +300,7 @@ pipeline {
                         withCredentials([file(credentialsId: 'ovh-s3-creds', variable: 'ovhs3')]) {
                             sh """
                                 export AWS_CONFIG_FILE=\$(echo \"\${ovhs3}\")
-                                aws s3 cp s3://sdkbinaries.tonlabs.io/version.json ./version.json
+                                aws s3 cp s3://sdkbinariestonlabsio/version.json ./version.json
                             """
                             if(params.common_version) {
                                 G_binversion = sh (script: "node tonVersion.js --set ${params.common_version} .", returnStdout: true).trim()
@@ -309,7 +309,7 @@ pipeline {
                             }
                             sh """
                                 export AWS_CONFIG_FILE=\$(echo \"\${ovhs3}\")
-                                aws s3 cp ./version.json s3://sdkbinaries.tonlabs.io/version.json
+                                aws s3 cp ./version.json s3://sdkbinariestonlabsio/version.json
                             """
                         }
                     }
@@ -468,7 +468,7 @@ pipeline {
                     withCredentials([file(credentialsId: 'ovh-s3-creds', variable: 'ovhs3')]) {
                         sh """
                             export AWS_CONFIG_FILE=\$(echo \"\${ovhs3}\")
-                            aws s3 cp s3://sdkbinaries.tonlabs.io/version.json ./version.json
+                            aws s3 cp s3://sdkbinariestonlabsio/version.json ./version.json
                         
                             echo const fs = require\\(\\'fs\\'\\)\\; > decline.js
                             echo const ver = JSON.parse\\(fs.readFileSync\\(\\'version.json\\'\\, \\'utf8\\'\\)\\)\\; >> decline.js
@@ -479,7 +479,7 @@ pipeline {
                             cat version.json
                             node decline.js
                         
-                            aws s3 cp ./version.json s3://sdkbinaries.tonlabs.io/version.json
+                            aws s3 cp ./version.json s3://sdkbinariestonlabsio/version.json
                         """
                     }
                 }
