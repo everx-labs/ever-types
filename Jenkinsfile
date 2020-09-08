@@ -1,5 +1,3 @@
-@Library('infrastructure-jenkins-shared-library') _
-
 G_giturl = ""
 G_gitcred = 'TonJenSSH'
 G_docker_creds = "TonJenDockerHub"
@@ -298,13 +296,21 @@ pipeline {
         stage('Versioning') {
             steps {
                 script {
-                    bucketFunctions._downloadFromBucket ".", "version.json", "."
-                    if(params.common_version) {
-                        G_binversion = sh (script: "node tonVersion.js --set ${params.common_version} .", returnStdout: true).trim()
-                    } else {
-                        G_binversion = sh (script: "node tonVersion.js .", returnStdout: true).trim()
+                    withCredentials([file(credentialsId: 'ovh-s3-creds', variable: 'ovhs3')]) {
+                        sh """
+                            export AWS_CONFIG_FILE=\$(echo \"\${ovhs3}\")
+                            aws s3 cp s3://sdkbinaries.tonlabs.io/version.json ./version.json
+                        """
+                        if(params.common_version) {
+                            G_binversion = sh (script: "node tonVersion.js --set ${params.common_version} .", returnStdout: true).trim()
+                        } else {
+                            G_binversion = sh (script: "node tonVersion.js .", returnStdout: true).trim()
+                        }
+                        sh """
+                            export AWS_CONFIG_FILE=\$(echo \"\${ovhs3}\")
+                            aws s3 cp ./version.json s3://sdkbinaries.tonlabs.io/version.json
+                        """
                     }
-                    bucketFunctions._uploadToBucket ".", "version.json", "."
                 }
             }
         }
@@ -457,18 +463,23 @@ pipeline {
                 def cause = "${currentBuild.getBuildCauses()}"
                 echo "${cause}"
                 if(!cause.matches('upstream')) {
-                    bucketFunctions._downloadFromBucket ".", "version.json", "."
-                    sh """
-                        echo const fs = require\\(\\'fs\\'\\)\\; > decline.js
-                        echo const ver = JSON.parse\\(fs.readFileSync\\(\\'version.json\\'\\, \\'utf8\\'\\)\\)\\; >> decline.js
-                        echo if\\(!ver.release\\) { throw new Error\\(\\'Unable to set decline version\\'\\)\\; } >> decline.js
-                        echo ver.candidate = \\'\\'\\; >> decline.js
-                        echo fs.writeFileSync\\(\\'version.json\\', JSON.stringify\\(ver\\)\\)\\; >> decline.js
-                        cat decline.js
-                        cat version.json
-                        node decline.js
-                    """
-                    bucketFunctions._uploadToBucket ".", "version.json", "."
+                    withCredentials([file(credentialsId: 'ovh-s3-creds', variable: 'ovhs3')]) {
+                        sh """
+                            export AWS_CONFIG_FILE=\$(echo \"\${ovhs3}\")
+                            aws s3 cp s3://sdkbinaries.tonlabs.io/version.json ./version.json
+                        
+                            echo const fs = require\\(\\'fs\\'\\)\\; > decline.js
+                            echo const ver = JSON.parse\\(fs.readFileSync\\(\\'version.json\\'\\, \\'utf8\\'\\)\\)\\; >> decline.js
+                            echo if\\(!ver.release\\) { throw new Error\\(\\'Unable to set decline version\\'\\)\\; } >> decline.js
+                            echo ver.candidate = \\'\\'\\; >> decline.js
+                            echo fs.writeFileSync\\(\\'version.json\\', JSON.stringify\\(ver\\)\\)\\; >> decline.js
+                            cat decline.js
+                            cat version.json
+                            node decline.js
+                        
+                            aws s3 cp ./version.json s3://sdkbinaries.tonlabs.io/version.json
+                        """
+                    }
                 }
             }
         }
