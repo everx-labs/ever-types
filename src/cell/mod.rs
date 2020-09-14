@@ -938,10 +938,22 @@ impl CellImpl for DataCell {
 #[derive(Clone)]
 struct UsageCell {
     cell: Cell,
+    visit_on_load: bool,
     visited: Weak<RwLock<HashSet<UInt256>>>
 }
 
 impl UsageCell {
+    fn new(inner: Cell, visit_on_load: bool, visited: Weak<RwLock<HashSet<UInt256>>>) -> Self {
+        let cell = Self {
+            cell: inner,
+            visit_on_load,
+            visited
+        };
+        if visit_on_load {
+            cell.visit();
+        }
+        cell
+    }
     fn visit(&self) -> bool {
         if let Some(visited) = self.visited.upgrade() {
             match visited.try_write() {
@@ -958,11 +970,16 @@ impl UsageCell {
 
 impl CellImpl for UsageCell {
     fn data(&self) -> &[u8] {
-        self.visit();
+        if !self.visit_on_load {
+            self.visit();
+        }
         self.cell.data()
     }
 
     fn cell_data(&self) -> &CellData {
+        if !self.visit_on_load {
+            self.visit();
+        }
         self.cell.cell_data()
     }
 
@@ -975,15 +992,11 @@ impl CellImpl for UsageCell {
     }
 
     fn reference(&self, index: usize) -> Result<Cell> {
-        if self.visit() {
-            Ok(
-                Cell::with_cell_impl(
-                    UsageCell {
-                        cell: self.cell.reference(index)?,
-                        visited: self.visited.clone(),
-                    }
-                )
-            )
+        if self.visit_on_load && self.visited.upgrade().is_some() ||
+           self.visit() {
+            let cell = UsageCell::new(
+                self.cell.reference(index)?, self.visit_on_load, self.visited.clone());
+            Ok(Cell::with_cell_impl(cell))
         } else {
             self.cell.reference(index)
         }
@@ -1075,10 +1088,17 @@ pub struct UsageTree {
 impl UsageTree {
     pub fn with_root(root: Cell) -> Self {
         let visited = Arc::new(RwLock::new(HashSet::new()));
-        let root = Cell::with_cell_impl_arc(Arc::new(UsageCell {
-            cell: root,
-            visited: Arc::downgrade(&visited)
-        }));
+        let root = Cell::with_cell_impl_arc(Arc::new(
+                UsageCell::new(root, false, Arc::downgrade(&visited))
+        ));
+        Self { root, visited }
+    }
+
+    pub fn with_params(root: Cell, visit_on_load: bool) -> Self {
+        let visited = Arc::new(RwLock::new(HashSet::new()));
+        let root = Cell::with_cell_impl_arc(Arc::new(
+            UsageCell::new(root, visit_on_load, Arc::downgrade(&visited))
+        ));
         Self { root, visited }
     }
 
@@ -1089,11 +1109,13 @@ impl UsageTree {
     pub fn root_cell(&self) -> Cell {
         self.root.clone()
     }
+
     /// destroy usage tree and free all cells
     pub fn visited(self) -> HashSet<UInt256> {
         // safe because Arc is used to share weak pointers, nobody must clone this Arc
         Arc::try_unwrap(self.visited).unwrap().into_inner().unwrap()
     }
+
     pub fn contains(&self, hash: &UInt256) -> bool {
         match self.visited.try_read() {
             Ok(visited) => return visited.contains(hash),
