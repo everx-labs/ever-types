@@ -312,17 +312,17 @@ fn find_leaf<T: HashmapType + ?Sized>(
                 return get_min_max::<T>(data, path, bit_len, next_index, next, gas_consumer)
             }
         }
-        (_, None, None) => if eq {
+        (_, None, None) => if eq { // same leaf found
             path.append_bytestring(&label)?;
             return Ok(Some(cursor))
         } else {
             return Ok(None)
         }
-        (_, Some(remainder), None) => { // label fully in key
+        (prefix_opt, Some(remainder), None) => { // label fully in key
             if !T::is_fork(&mut cursor)? {
                 fail!(ExceptionCode::DictionaryError)
             }
-            let next = match signed_int & path.is_empty() {
+            let next = match signed_int && path.is_empty() && prefix_opt.is_none() {
                 false => next_index,
                 true => 1 - next_index,
             };
@@ -344,7 +344,7 @@ fn find_leaf<T: HashmapType + ?Sized>(
     }
 }
 
-/// recursevily searchs min or max element from current subtree. Append path and returns element if found
+/// search min or max element from current subtree. Append path and returns element if found
 pub fn get_min_max<T: HashmapType + ?Sized>(
     mut data: Cell,
     path: &mut BuilderData,
@@ -357,13 +357,15 @@ pub fn get_min_max<T: HashmapType + ?Sized>(
         let mut cursor = gas_consumer.load_cell(data)?;
         let label = cursor.get_label(bit_len)?;
         let label_length = label.remaining_bits();
+        if path.is_empty() && !label.is_empty() {
+            index = next_index;
+        }
+        path.append_bytestring(&label)?;
         if T::is_fork(&mut cursor)? && bit_len > label_length {
-            bit_len = bit_len.checked_sub(label_length + 1).ok_or(ExceptionCode::CellUnderflow)?;
-            path.append_bytestring(&label)?;
+            bit_len -= label_length + 1;
             path.append_bit_bool(index == 1)?;
             data = cursor.reference(index)?;
         } else if bit_len == label_length {
-            path.append_bytestring(&label)?;
             return Ok(Some(cursor))
         } else {
             fail!(ExceptionCode::DictionaryError)
@@ -403,6 +405,11 @@ pub trait HashmapType {
     fn make_cell_with_label_and_data(key: SliceData, max: usize, _is_leaf: bool, data: &SliceData) -> Result<BuilderData> {
         let mut builder = hm_label(&key, max)?;
         builder.checked_append_references_and_data(data)?;
+        Ok(builder)
+    }
+    fn make_cell_with_label_and_builder(key: SliceData, max: usize, _is_leaf: bool, data: BuilderData) -> Result<BuilderData> {
+        let mut builder = hm_label(&key, max)?;
+        builder.append_builder(&data)?;
         Ok(builder)
     }
     fn make_edge(key: &SliceData, bit_len: usize, is_left: bool, mut next: SliceData) -> Result<BuilderData> {
