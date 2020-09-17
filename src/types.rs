@@ -65,13 +65,13 @@ impl PartialEq<SliceData> for UInt256 {
 
 impl PartialEq<UInt256> for &UInt256 {
     fn eq(&self, other: &UInt256) -> bool {
-        self == other
+        self.0 == other.0
     }
 }
 
 impl PartialEq<&UInt256> for UInt256 {
     fn eq(&self, other: &&UInt256) -> bool {
-        self == *other
+        self.0 == other.0
     }
 }
 
