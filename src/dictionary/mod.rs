@@ -403,13 +403,18 @@ pub trait HashmapType {
     }
     fn make_cell_with_label(key: SliceData, max: usize) -> Result<BuilderData> { hm_label(&key, max) }
     fn make_cell_with_label_and_data(key: SliceData, max: usize, _is_leaf: bool, data: &SliceData) -> Result<BuilderData> {
-        let mut builder = hm_label(&key, max)?;
+        let mut builder = Self::make_cell_with_label(key, max)?;
         builder.checked_append_references_and_data(data)?;
         Ok(builder)
     }
     fn make_cell_with_label_and_builder(key: SliceData, max: usize, _is_leaf: bool, data: BuilderData) -> Result<BuilderData> {
-        let mut builder = hm_label(&key, max)?;
+        let mut builder = Self::make_cell_with_label(key, max)?;
         builder.append_builder(&data)?;
+        Ok(builder)
+    }
+    fn make_cell_with_remainder(key: SliceData, max: usize, remainder: &SliceData) -> Result<BuilderData> {
+        let mut builder = Self::make_cell_with_label(key, max)?;
+        builder.checked_append_references_and_data(remainder)?;
         Ok(builder)
     }
     fn make_edge(key: &SliceData, bit_len: usize, is_left: bool, mut next: SliceData) -> Result<BuilderData> {
@@ -665,10 +670,99 @@ pub trait HashmapType {
     where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> {
         let bit_len = self.bit_len();
         if bit_len != other.bit_len() {
-            fail!("Different bitlen");
+            fail!("Different bitlen")
         }
         dict_scan_diff::<Self, _>(self.data().cloned(), other.data().cloned(), BuilderData::default(), bit_len, bit_len, &mut func)
     }
+
+    /// combine all items from two hashamps
+    /// will fail if trees have different items with same key
+    fn combine_with(&mut self, other: &Self) -> Result<bool> {
+        let bit_len = self.bit_len();
+        if bit_len != other.bit_len() {
+            fail!("Different bitlen")
+        }
+        match (self.data().cloned(), other.data().cloned()) {
+            (Some(mut cell1), Some(cell2)) => {
+                if dict_combine_with_cell::<Self>(&mut cell1, cell2, bit_len)? {
+                    *self.data_mut() = Some(cell1);
+                    return Ok(true)
+                }
+                Ok(false)
+            }
+            (None, Some(cell2)) => {
+                *self.data_mut() = Some(cell2);
+                Ok(true)
+            }
+            (_, None) => Ok(false)
+        }
+    }
+}
+
+fn dict_combine_with_cell<T: HashmapType + ?Sized>(cell1: &mut Cell, cell2: Cell, bit_len: usize) -> Result<bool> {
+    let mut cursor2 = SliceData::from(cell2);
+    let label2 = cursor2.get_label(bit_len)?;
+    let bit_len2 = bit_len.checked_sub(label2.remaining_bits()).ok_or_else(|| error!(ExceptionCode::CellUnderflow))?;
+    dict_combine_with::<T>(cell1, bit_len, cursor2, label2, bit_len2)
+}
+
+fn dict_combine_with<T: HashmapType + ?Sized>(
+    cell1: &mut Cell, bit_len: usize,
+    mut cursor2: SliceData, label2: SliceData, bit_len2: usize
+) -> Result<bool> {
+    let mut cursor1 = SliceData::from(cell1.clone());
+    let label1 = cursor1.get_label(bit_len)?;
+    let bit_len1 = bit_len.checked_sub(label1.remaining_bits()).ok_or_else(|| error!(ExceptionCode::CellUnderflow))?;
+    match dbg!(SliceData::common_prefix(&label1, &label2)) {
+        (_prefix_opt, None, None) => if cursor1 == cursor2 { // same level
+            return Ok(false)
+        } else if bit_len1 == 0 { // do not allow to replace leafs
+            fail!(ExceptionCode::DictionaryError)
+        } else { // continue like with two separate trees
+            let mut left1 = cursor1.checked_drain_reference()?;
+            let left2 = cursor2.checked_drain_reference()?;
+            let mut right1 = cursor1.checked_drain_reference()?;
+            let right2 = cursor2.checked_drain_reference()?;
+            if dict_combine_with_cell::<T>(&mut left1, left2, bit_len2)? |
+                dict_combine_with_cell::<T>(&mut right1, right2, bit_len2)? {
+                *cell1 = T::make_fork(&label1, bit_len, left1, right1, false)?.0.into();
+                return Ok(true)
+            }
+        }
+        (prefix_opt, Some(mut rem1), rem2_opt) => { // slice edge
+            let prefix = prefix_opt.unwrap_or_default(); // 
+            let (builder, _remainder) = if let Some(mut rem2) = rem2_opt { // simple slice of both trees and make new fork
+                let bit_len1 = bit_len - prefix.remaining_bits() - 1;
+                let next_index = rem1.get_next_bit_int()?;
+                rem2.get_next_bit_int()?; // == 1 - next_index
+                let left = T::make_cell_with_remainder(rem1, bit_len1, &cursor1)?.into();
+                let right = T::make_cell_with_remainder(rem2, bit_len1, &cursor2)?.into();
+                T::make_fork(&prefix, bit_len, left, right, next_index != 0)?
+            } else if bit_len2 == 0 { // second should not stop here
+                fail!(ExceptionCode::DictionaryError)
+            } else { // slice edge of first and add items from first to second, then make new fork
+                let next_index = rem1.get_next_bit_int()?;
+                let mut next = cursor2.reference(next_index)?;
+                let other = cursor2.reference(1 - next_index)?;
+                dict_combine_with::<T>(&mut next, bit_len2, cursor1, rem1, bit_len2 - 1)?;
+                T::make_fork(&prefix, bit_len, next, other, next_index != 0)?
+            };
+            *cell1 = builder.into();
+            return Ok(true)
+        }
+        (_prefix_opt, None, Some(mut rem2)) => if bit_len1 == 0 { // it should not be leaf
+            fail!(ExceptionCode::DictionaryError)
+        } else { // select branch and continue
+            let next_index = rem2.get_next_bit_int()?;
+            let mut next = cursor1.reference(next_index)?;
+            let other = cursor1.reference(1 - next_index)?;
+            if dict_combine_with::<T>(&mut next, bit_len1 - 1, cursor2, rem2, bit_len2)? {
+                *cell1 = T::make_fork(&label1, bit_len, next, other, next_index != 0)?.0.into();
+                return Ok(true)
+            }
+        }
+    }
+    Ok(false)
 }
 
 fn scan_diff_leaf_reched<T, F>(

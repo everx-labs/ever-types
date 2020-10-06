@@ -413,6 +413,10 @@ impl Cell {
         let bytes = std::fs::read(file_name).unwrap();
         crate::cells_serialization::deserialize_tree_of_cells(&mut std::io::Cursor::new(bytes)).unwrap()
     }
+    pub fn write_to_file(&self, file_name: &str) {
+        let bytes = crate::cells_serialization::serialize_toc(self).unwrap();
+        std::fs::write(file_name, bytes).unwrap();
+    }
 }
 
 impl Default for Cell {
@@ -1080,6 +1084,7 @@ impl CellImpl for VirtualCell {
     }
 }
 
+#[derive(Default)]
 pub struct UsageTree {
     root: Cell,
     visited: Arc<RwLock<HashSet<UInt256>>>
@@ -1102,6 +1107,22 @@ impl UsageTree {
         Self { root, visited }
     }
 
+    pub fn recreate(&mut self) {
+        self.visited = Arc::new(Arc::try_unwrap(std::mem::take(&mut self.visited)).unwrap())
+    }
+
+    pub fn use_cell(&self, cell: Cell, visit_on_load: bool) -> Cell {
+        let usage_cell = UsageCell::new(cell, visit_on_load, Arc::downgrade(&self.visited));
+        usage_cell.visit();
+        Cell::with_cell_impl(usage_cell)
+    }
+
+    pub fn use_cell_opt(&self, cell_opt: &mut Option<Cell>, visit_on_load: bool) {
+        if let Some(cell) = cell_opt.as_mut() {
+            *cell = self.use_cell(cell.clone(), visit_on_load);
+        }
+    }
+
     pub fn root_slice(&self) -> SliceData {
         SliceData::from(self.root.clone())
     }
@@ -1122,6 +1143,15 @@ impl UsageTree {
             Err(err) => debug_assert!(false, "usage tree read error {}", err)
         }
         false
+    }
+    pub fn visited_len(&self) -> usize {
+        match self.visited.try_read() {
+            Err(err) => {
+                debug_assert!(false, "usage tree read error {}", err);
+                0
+            }
+            Ok(visited) => visited.len()
+        }
     }
 }
 
