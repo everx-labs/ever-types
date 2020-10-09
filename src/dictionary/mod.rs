@@ -713,7 +713,7 @@ fn dict_combine_with<T: HashmapType + ?Sized>(
     let mut cursor1 = SliceData::from(cell1.clone());
     let label1 = cursor1.get_label(bit_len)?;
     let bit_len1 = bit_len.checked_sub(label1.remaining_bits()).ok_or_else(|| error!(ExceptionCode::CellUnderflow))?;
-    match dbg!(SliceData::common_prefix(&label1, &label2)) {
+    match SliceData::common_prefix(&label1, &label2) {
         (_prefix_opt, None, None) => if cursor1 == cursor2 { // same level
             return Ok(false)
         } else if bit_len1 == 0 { // do not allow to replace leafs
