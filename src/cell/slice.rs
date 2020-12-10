@@ -255,10 +255,14 @@ impl SliceData {
     }
 
     pub fn reference(&self, i: usize) -> Result<Cell> {
+        Ok(self.reference_opt(i).ok_or(ExceptionCode::CellUnderflow)?)
+    }
+
+    pub fn reference_opt(&self, i: usize) -> Option<Cell> {
         if self.references_window.start + i < self.references_window.end {
-            self.cell.reference(self.references_window.start + i)
+            self.cell.reference(self.references_window.start + i).ok()
         } else {
-            fail!(ExceptionCode::CellUnderflow)
+            None
         }
     }
 
@@ -365,14 +369,17 @@ impl SliceData {
     }
 
     pub fn get_next_bit_int(&mut self) -> Result<usize> {
-        let byte = self.get_bits(0, 1)?;
-        self.move_by(1)?;
-        Ok(byte as usize)
+        Ok(self.get_next_bit_opt().ok_or(ExceptionCode::CellUnderflow)?)
     }
 
-    #[allow(dead_code)]
-    pub fn get_next_bit_option(&mut self) -> Option<usize> {
-        self.get_next_bit_int().ok()
+    pub fn get_next_bit_opt(&mut self) -> Option<usize> {
+        if self.remaining_bits() == 0 {
+            None
+        } else {
+            let byte = self.get_bits(0, 1).ok()?;
+            self.move_by(1).ok()?;
+            Some(byte as usize)
+        }
     }
 
     pub fn get_next_byte(&mut self) -> Result<u8> {

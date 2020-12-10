@@ -387,7 +387,7 @@ pub trait HashmapType {
     }
     fn read_hashmap_data(&mut self, slice: &mut SliceData) -> Result<()> {
         let data = slice.get_dictionary()?;
-        *self.data_mut() = data.reference(0).ok();
+        *self.data_mut() = data.reference_opt(0);
         Ok(())
     }
     fn is_empty(&self) -> bool {
