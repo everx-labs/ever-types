@@ -42,7 +42,7 @@ impl PfxHashmapE {
     }
     /// construct with bit_len and data representing dictionary
     pub fn with_data(bit_len: usize, data: SliceData) -> Self {
-        Self::with_hashmap(bit_len, data.reference(0).ok())
+        Self::with_hashmap(bit_len, data.reference_opt(0))
     }
     /// construct with bit_len and root representing Hashmap
     pub fn with_hashmap(bit_len: usize, data: Option<Cell>) -> Self {
