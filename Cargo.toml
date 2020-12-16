@@ -21,7 +21,6 @@ name = "ton_types"
 version = "1.0.0"
 
 [dependencies]
-lockfree = { git = "https://github.com/tonlabs/lockfree.git" }
 
 # External
 crc = "^1.8.1"
