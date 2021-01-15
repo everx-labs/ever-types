@@ -14,8 +14,7 @@
 use crate::{error, fail};
 use crate::types::{ExceptionCode, Result, UInt256, ByteOrderRead};
 use crate::cells_serialization::{SHA256_SIZE, BagOfCells};
-use std::sync::{Arc, RwLock, Weak};
-use std::collections::HashSet;
+use std::sync::{Arc, Weak};
 use std::fmt;
 use std::ops::{BitOr, BitOrAssign};
 use sha2::{Sha256, Digest};
@@ -943,11 +942,11 @@ impl CellImpl for DataCell {
 struct UsageCell {
     cell: Cell,
     visit_on_load: bool,
-    visited: Weak<RwLock<HashSet<UInt256>>>
+    visited: Weak<lockfree::set::Set<UInt256>>
 }
 
 impl UsageCell {
-    fn new(inner: Cell, visit_on_load: bool, visited: Weak<RwLock<HashSet<UInt256>>>) -> Self {
+    fn new(inner: Cell, visit_on_load: bool, visited: Weak<lockfree::set::Set<UInt256>>) -> Self {
         let cell = Self {
             cell: inner,
             visit_on_load,
@@ -960,13 +959,8 @@ impl UsageCell {
     }
     fn visit(&self) -> bool {
         if let Some(visited) = self.visited.upgrade() {
-            match visited.try_write() {
-                Ok(mut visited) => {
-                    visited.insert(self.cell.repr_hash());
-                    return true
-                }
-                Err(err) => debug_assert!(false, "usage tree write error {}", err)
-            }
+            visited.insert(self.cell.repr_hash()).ok();
+            return true
         }
         false
     }
@@ -1087,28 +1081,23 @@ impl CellImpl for VirtualCell {
 #[derive(Default)]
 pub struct UsageTree {
     root: Cell,
-    visited: Arc<RwLock<HashSet<UInt256>>>
+    visited: Arc<lockfree::set::Set<UInt256>>
 }
 
 impl UsageTree {
     pub fn with_root(root: Cell) -> Self {
-        let visited = Arc::new(RwLock::new(HashSet::new()));
-        let root = Cell::with_cell_impl_arc(Arc::new(
-                UsageCell::new(root, false, Arc::downgrade(&visited))
-        ));
+        let visited = Arc::new(lockfree::set::Set::new());
+        let usage_cell = UsageCell::new(root, false, Arc::downgrade(&visited));
+        let root = Cell::with_cell_impl_arc(Arc::new(usage_cell));
         Self { root, visited }
     }
 
     pub fn with_params(root: Cell, visit_on_load: bool) -> Self {
-        let visited = Arc::new(RwLock::new(HashSet::new()));
+        let visited = Arc::new(lockfree::set::Set::new());
         let root = Cell::with_cell_impl_arc(Arc::new(
             UsageCell::new(root, visit_on_load, Arc::downgrade(&visited))
         ));
         Self { root, visited }
-    }
-
-    pub fn recreate(&mut self) {
-        self.visited = Arc::new(Arc::try_unwrap(std::mem::take(&mut self.visited)).unwrap())
     }
 
     pub fn use_cell(&self, cell: Cell, visit_on_load: bool) -> Cell {
@@ -1132,26 +1121,13 @@ impl UsageTree {
     }
 
     /// destroy usage tree and free all cells
-    pub fn visited(self) -> HashSet<UInt256> {
+    pub fn visited(self) -> lockfree::set::Set<UInt256> {
         // safe because Arc is used to share weak pointers, nobody must clone this Arc
-        Arc::try_unwrap(self.visited).unwrap().into_inner().unwrap()
+        Arc::try_unwrap(self.visited).unwrap()
     }
 
     pub fn contains(&self, hash: &UInt256) -> bool {
-        match self.visited.try_read() {
-            Ok(visited) => return visited.contains(hash),
-            Err(err) => debug_assert!(false, "usage tree read error {}", err)
-        }
-        false
-    }
-    pub fn visited_len(&self) -> usize {
-        match self.visited.try_read() {
-            Err(err) => {
-                debug_assert!(false, "usage tree read error {}", err);
-                0
-            }
-            Ok(visited) => visited.len()
-        }
+        self.visited.contains(hash)
     }
 }
 
