@@ -95,12 +95,12 @@ impl UInt256 {
     }
 
     pub fn from_str(value: &str) -> Result<Self> {
-        if value.len() != 64 {
-            fail!("invalid account ID string length (64 expected)")
-        } else {
-            let bytes = hex::decode(value)?;
-            Ok(UInt256::from(bytes))
-        }
+        let bytes = match value.len() {
+            64 => hex::decode(value)?,
+            44 => base64::decode(value)?,
+            _ => fail!("invalid account ID string length (64 expected)")
+        };
+        Ok(UInt256::from(bytes))
     }
 
     pub fn calc_file_hash(bytes: &[u8]) -> Self {
