@@ -274,15 +274,21 @@ impl SliceData {
         }
     }
     pub fn get_dictionary(&mut self) -> Result<SliceData> {
+        self.get_dictionary_opt().ok_or_else(|| error!(ExceptionCode::CellUnderflow))
+    }
+
+    pub fn get_dictionary_opt(&mut self) -> Option<SliceData> {
         let mut root = self.clone();
-        if !self.get_next_bit()? {
+        if self.get_next_bit_opt()? == 0 {
             root.shrink_references(..0);
+        } else if self.remaining_references() == 0 {
+            return None
         } else {
-            self.checked_drain_reference()?;
+            self.checked_drain_reference().ok()?;
             root.shrink_references(..1);
         }
         root.shrink_data(..1);
-        Ok(root)
+        Some(root)
     }
 }
 
@@ -418,8 +424,7 @@ pub trait HashmapType {
         Ok(builder)
     }
     fn make_edge(key: &SliceData, bit_len: usize, is_left: bool, mut next: SliceData) -> Result<BuilderData> {
-        let mut next_bit_len = bit_len.checked_sub(key.remaining_bits() + 1)
-            .ok_or_else(|| error!(ExceptionCode::CellUnderflow))?;
+        let mut next_bit_len = bit_len.checked_sub(key.remaining_bits() + 1).ok_or(ExceptionCode::CellUnderflow)?;
         let mut label = BuilderData::from_slice(&key);
         label.append_bit_bool(!is_left)?;
         label = next.get_label_raw(&mut next_bit_len, label)?;
@@ -702,7 +707,7 @@ pub trait HashmapType {
 fn dict_combine_with_cell<T: HashmapType + ?Sized>(cell1: &mut Cell, cell2: Cell, bit_len: usize) -> Result<bool> {
     let mut cursor2 = SliceData::from(cell2);
     let label2 = cursor2.get_label(bit_len)?;
-    let bit_len2 = bit_len.checked_sub(label2.remaining_bits()).ok_or_else(|| error!(ExceptionCode::CellUnderflow))?;
+    let bit_len2 = bit_len.checked_sub(label2.remaining_bits()).ok_or(ExceptionCode::CellUnderflow)?;
     dict_combine_with::<T>(cell1, bit_len, cursor2, label2, bit_len2)
 }
 
@@ -712,51 +717,54 @@ fn dict_combine_with<T: HashmapType + ?Sized>(
 ) -> Result<bool> {
     let mut cursor1 = SliceData::from(cell1.clone());
     let label1 = cursor1.get_label(bit_len)?;
-    let bit_len1 = bit_len.checked_sub(label1.remaining_bits()).ok_or_else(|| error!(ExceptionCode::CellUnderflow))?;
+    let bit_len1 = bit_len.checked_sub(label1.remaining_bits()).ok_or(ExceptionCode::CellUnderflow)?;
     match SliceData::common_prefix(&label1, &label2) {
-        (_prefix_opt, None, None) => if cursor1 == cursor2 { // same level
-            return Ok(false)
-        } else if bit_len1 == 0 { // do not allow to replace leafs
-            fail!(ExceptionCode::DictionaryError)
-        } else { // continue like with two separate trees
-            let mut left1 = cursor1.checked_drain_reference()?;
-            let left2 = cursor2.checked_drain_reference()?;
-            let mut right1 = cursor1.checked_drain_reference()?;
-            let right2 = cursor2.checked_drain_reference()?;
-            if dict_combine_with_cell::<T>(&mut left1, left2, bit_len2)? |
-                dict_combine_with_cell::<T>(&mut right1, right2, bit_len2)? {
-                *cell1 = T::make_fork(&label1, bit_len, left1, right1, false)?.0.into();
-                return Ok(true)
+        (_prefix_opt, None, None) => {
+            if cursor1 == cursor2 { // same level
+                return Ok(false)
+            } else if bit_len1 == 0 { // do not allow to replace leafs
+                fail!(ExceptionCode::DictionaryError)
+            } else { // continue like with two separate trees
+                let mut left1 = cursor1.checked_drain_reference()?;
+                let left2 = cursor2.checked_drain_reference()?;
+                let mut right1 = cursor1.checked_drain_reference()?;
+                let right2 = cursor2.checked_drain_reference()?;
+                if dict_combine_with_cell::<T>(&mut left1, left2, bit_len1 - 1)? |
+                    dict_combine_with_cell::<T>(&mut right1, right2, bit_len1 - 1)? {
+                    *cell1 = T::make_fork(&label1, bit_len, left1, right1, false)?.0.into();
+                    return Ok(true)
+                }
             }
         }
         (prefix_opt, Some(mut rem1), rem2_opt) => { // slice edge
-            let prefix = prefix_opt.unwrap_or_default(); // 
-            let (builder, _remainder) = if let Some(mut rem2) = rem2_opt { // simple slice of both trees and make new fork
-                let bit_len1 = bit_len - prefix.remaining_bits() - 1;
-                let next_index = rem1.get_next_bit_int()?;
+            let next_index = rem1.get_next_bit_int()?;
+            *cell1 = if let Some(mut rem2) = rem2_opt { // simple slice of both trees and make new fork
                 rem2.get_next_bit_int()?; // == 1 - next_index
+                let prefix = prefix_opt.unwrap_or_default(); // 
+                let bit_len1 = bit_len - prefix.remaining_bits() - 1;
                 let left = T::make_cell_with_remainder(rem1, bit_len1, &cursor1)?.into();
                 let right = T::make_cell_with_remainder(rem2, bit_len1, &cursor2)?.into();
-                T::make_fork(&prefix, bit_len, left, right, next_index != 0)?
+                T::make_fork(&prefix, bit_len, left, right, next_index != 0)?.0.into()
             } else if bit_len2 == 0 { // second should not stop here
                 fail!(ExceptionCode::DictionaryError)
             } else { // slice edge of first and add items from first to second, then make new fork
-                let next_index = rem1.get_next_bit_int()?;
                 let mut next = cursor2.reference(next_index)?;
                 let other = cursor2.reference(1 - next_index)?;
-                dict_combine_with::<T>(&mut next, bit_len2, cursor1, rem1, bit_len2 - 1)?;
-                T::make_fork(&prefix, bit_len, next, other, next_index != 0)?
+                dict_combine_with::<T>(&mut next, bit_len2 - 1, cursor1, rem1, bit_len1)?;
+                T::make_fork(&label2, bit_len, next, other, next_index != 0)?.0.into()
             };
-            *cell1 = builder.into();
             return Ok(true)
         }
-        (_prefix_opt, None, Some(mut rem2)) => if bit_len1 == 0 { // it should not be leaf
-            fail!(ExceptionCode::DictionaryError)
-        } else { // select branch and continue
-            let next_index = rem2.get_next_bit_int()?;
-            let mut next = cursor1.reference(next_index)?;
-            let other = cursor1.reference(1 - next_index)?;
-            if dict_combine_with::<T>(&mut next, bit_len1 - 1, cursor2, rem2, bit_len2)? {
+        (_prefix_opt, None, Some(mut rem2)) => {
+            if bit_len1 == 0 { // it should not be leaf
+                fail!(ExceptionCode::DictionaryError)
+            } else { // select branch and continue, then make new fork
+                let next_index = rem2.get_next_bit_int()?;
+                let mut next = cursor1.reference(next_index)?;
+                let other = cursor1.reference(1 - next_index)?;
+                if !dict_combine_with::<T>(&mut next, bit_len1 - 1, cursor2, rem2, bit_len2)? {
+                    return Ok(false)
+                }
                 *cell1 = T::make_fork(&label1, bit_len, next, other, next_index != 0)?.0.into();
                 return Ok(true)
             }
@@ -1375,7 +1383,7 @@ pub struct HashmapIterator<T: HashmapType + ?Sized> {
 }
 
 impl<T: HashmapType + ?Sized> HashmapIterator<T> {
-    fn from_hashmap(tree: &T) -> Self {
+    pub fn from_hashmap(tree: &T) -> Self {
         let mut pos = vec![];
         if let Some(root) = tree.data() {
             pos.push((LabelReader::with_cell(root), tree.bit_len(), BuilderData::default()));
@@ -1383,7 +1391,7 @@ impl<T: HashmapType + ?Sized> HashmapIterator<T> {
         Self { pos, phantom: PhantomData::<T> }
     }
     // is_leaf and is_fork are not used here
-    fn next_item(&mut self) -> Result<Option<(BuilderData, SliceData)>> {
+    pub fn next_item(&mut self) -> Result<Option<(BuilderData, SliceData)>> {
         while let Some((mut cursor, mut bit_len, key)) = self.pos.pop() {
             let key = cursor.get_label_raw(&mut bit_len, key)?;
             if bit_len == 0 {

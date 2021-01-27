@@ -52,10 +52,7 @@ impl HashmapE {
     }
     /// construct with bit_len and root representing Hashmap
     pub fn with_hashmap(bit_len: usize, data: Option<Cell>) -> Self {
-        Self {
-            bit_len,
-            data: data
-        }
+        Self { bit_len, data }
     }
     /// serialize not empty root in current cell
     pub fn write_hashmap_root(&self, cell: &mut BuilderData) -> Result<()> {

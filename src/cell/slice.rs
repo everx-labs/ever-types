@@ -141,7 +141,7 @@ impl SliceData {
 
     pub fn from_string(value: &str) -> Result<SliceData> {
         parse_slice_base(value, 0, 16)
-            .ok_or(error!(ExceptionCode::FatalError))
+            .ok_or_else(|| error!(ExceptionCode::FatalError))
             .and_then(|vec| BuilderData::with_bitstring(vec))
             .map(|builder| builder.into())
     }
@@ -407,7 +407,8 @@ impl SliceData {
             return Ok(0)
         }
         if bits > 64 {
-            fail!(ExceptionCode::RangeCheckError)
+            // get_next_int_bytes
+            fail!("too many bits {} > 64", bits)
         }
         let mut value: u64 = 0;
         let bytes = bits / 8;
