@@ -96,7 +96,7 @@ impl PartialEq for SliceData {
 
 impl Default for SliceData {
     fn default() -> Self {
-        BuilderData::new().into()
+        Cell::default().into()
     }
 }
 
@@ -136,7 +136,7 @@ impl From<Cell> for SliceData {
 
 impl SliceData {
     pub fn new_empty() -> SliceData {
-        BuilderData::new().into()
+        SliceData::default()
     }
 
     pub fn from_string(value: &str) -> Result<SliceData> {
@@ -664,8 +664,10 @@ impl SliceData {
 /// subject to move to tests
 impl SliceData {
     pub fn new(data: Vec<u8>) -> SliceData {
-        let ret = BuilderData::with_bitstring(data).unwrap();
-        ret.into()
+        match crate::find_tag(data.as_slice()) {
+            0 => SliceData::default(),
+            length_in_bits => BuilderData::with_raw(data, length_in_bits).unwrap().into()
+        }
     }
 
     pub fn from_raw(data: Vec<u8>, length_in_bits: usize) -> SliceData {

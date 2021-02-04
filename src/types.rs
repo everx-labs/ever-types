@@ -51,7 +51,7 @@ macro_rules! fail {
     };
 }
 
-#[derive(Clone, Default, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct UInt256([u8; 32]);
 
 impl PartialEq<SliceData> for UInt256 {
@@ -113,6 +113,9 @@ impl UInt256 {
 
     pub const MIN: UInt256 = UInt256([0; 32]);
     pub const MAX: UInt256 = UInt256([0xFF; 32]);
+    // hash of default cell 0x96a296d224f285c67bee93c30f8a309157f0daa35dc5b87e410b78630a09cfc7;
+    pub const DEFAULT_CELL_HASH: UInt256 = UInt256([150, 162, 150, 210, 36, 242, 133, 198, 123, 238, 147,
+        195, 15, 138, 48, 145, 87, 240, 218, 163, 93, 197, 184, 126, 65, 11, 120, 99, 10, 9, 207, 199]);
 }
 
 impl From<[u8;32]> for UInt256 {
