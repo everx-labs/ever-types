@@ -368,8 +368,8 @@ struct RawCell {
     pub level: u8,
     pub data: Vec<u8>,
     pub refs: Vec<u32>,
-    pub hashes: Option<Vec<UInt256>>,
-    pub depths: Option<Vec<u16>>,
+    pub hashes: Option<[UInt256; 4]>,
+    pub depths: Option<[u16; 4]>,
 }
 
 pub fn deserialize_tree_of_cells<T: Read>(src: &mut T) -> Result<Cell> {
@@ -586,15 +586,16 @@ fn deserialize_cell<T>(src: &mut T, ref_size: usize, cell_index: usize, cells_co
     }
     
     let (hashes_opt, depths_opt) = if h {
-        let mut hashes = Vec::new();
-        let mut depths = Vec::new();
-        for _ in 0..(l + 1) {
+        let mut hashes = [UInt256::default(); 4];
+        let mut depths = [0; 4];
+        let level = LevelMask::with_mask(l).level() as usize;
+        for i in 0..=level {
             let mut hash = [0; SHA256_SIZE];
             src.read(&mut hash)?;
-            hashes.push(UInt256::from(hash));
+            hashes[i] = UInt256::from(hash);
         }
-        for _ in 0..(l + 1) {
-            depths.push(src.read_be_uint(DEPTH_SIZE)? as u16);
+        for i in 0..=level {
+            depths[i] = src.read_be_uint(DEPTH_SIZE)? as u16;
         }
         (Some(hashes), Some(depths))
     } else {

@@ -520,15 +520,25 @@ pub struct CellData {
     bit_length: u16,
     level_mask: LevelMask,
     store_hashes: bool,
-    hashes: Option<Vec<UInt256>>,
-    depths: Option<Vec<u16>>,
+    hashes: Option<[UInt256; 4]>,
+    depths: Option<[u16; 4]>,
 }
 
 impl CellData {
-    pub fn with_params(cell_type: CellType, data: Vec<u8>, level_mask: u8, store_hashes: bool, hashes: Option<Vec<UInt256>>, depths: Option<Vec<u16>>) -> Self {
-        let bit_length = find_tag(&data);
+    pub const fn new() -> Self {
+        Self {
+            cell_type: CellType::Ordinary,
+            data: vec![],
+            bit_length: 0,
+            level_mask: LevelMask(0),
+            store_hashes: false,
+            hashes: Some([UInt256::DEFAULT_CELL_HASH, UInt256::MIN, UInt256::MIN, UInt256::MIN]),
+            depths: Some([0; 4]),
+        }
+    }
+    pub fn with_params(cell_type: CellType, data: Vec<u8>, level_mask: u8, store_hashes: bool, hashes: Option<[UInt256; 4]>, depths: Option<[u16; 4]>) -> Self {
+        let bit_length = find_tag(&data) as u16;
         assert!(bit_length < 1024);
-        let bit_length = bit_length as u16;
         Self {
             cell_type,
             data,
@@ -564,31 +574,31 @@ impl CellData {
         self.store_hashes
     }
 
-    pub fn hashes(&self) -> Option<&Vec<UInt256>> {
+    pub fn hashes(&self) -> Option<&[UInt256; 4]> {
         self.hashes.as_ref()
     }
 
-    fn set_hashes(&mut self, hashes: Option<Vec<UInt256>>) {
+    fn set_hashes(&mut self, hashes: Option<[UInt256; 4]>) {
         self.hashes = hashes
     }
 
-    pub fn depths(&self) -> Option<&Vec<u16>> {
+    pub fn depths(&self) -> Option<&[u16; 4]> {
         self.depths.as_ref()
     }
 
-    fn set_depths(&mut self, depths: Option<Vec<u16>>) {
+    fn set_depths(&mut self, depths: Option<[u16; 4]>) {
         self.depths = depths
     }
 
     pub fn hash(&self, mut index: usize) -> UInt256 {
         index = self.level_mask.calc_hash_index(index);
         if self.cell_type() == CellType::PrunedBranch {
-            // pruned cell stores all hashes (except representetion) in data
+            // pruned cell stores all hashes (except representation) in data
             if index != self.level() as usize {
                 let offset = 1 + 1 + index * SHA256_SIZE;
                 self.data()[offset..offset + SHA256_SIZE].into()
-            } else if let Some(hashes) = self.hashes().as_ref() {
-                hashes.get(0).cloned().expect("cell is not finalized")
+            } else if let Some(hashes) = self.hashes.as_ref() {
+                hashes[0].clone()
             } else {
                 unreachable!("cell is not finalized")
             }
@@ -626,26 +636,34 @@ impl CellData {
     }
 
     /// Binary serialization of cell data
-    pub fn serialize<T: Write>(&self, writer: &mut T) -> std::io::Result<()> {
+    pub fn serialize<T: Write>(&self, writer: &mut T) -> Result<()> {
         writer.write(&[self.cell_type.to_u8().unwrap()])?;
         writer.write(&self.bit_length.to_le_bytes())?;
         writer.write(&self.data[0..(self.bit_length as usize + 8) / 8])?;
         writer.write(&[self.level_mask.0])?;
         writer.write(&[if self.store_hashes { 1 } else { 0 }])?;
         if let Some(ref hashes) = self.hashes {
+            let mut len = hashes.len();
+            if let Some(pos) = hashes.iter().position(|hash| hash == UInt256::MIN) {
+                len = std::cmp::min(len, pos);
+            }
             writer.write(&[1])?;
-            writer.write(&[hashes.len() as u8])?;
-            for hash in hashes {
-                writer.write(hash.as_slice())?;
+            writer.write(&[len as u8])?;
+            for i in 0..len {
+                writer.write(hashes[i].as_slice())?;
             }
         } else {
             writer.write(&[0])?;
         }
         if let Some(ref depths) = self.depths {
+            let mut len = depths.len();
+            if let Some(pos) = depths.iter().position(|depth| depth == &0) {
+                len = std::cmp::min(len, pos);
+            }
             writer.write(&[1])?;
-            writer.write(&[depths.len() as u8])?;
-            for depth in depths {
-                writer.write(&depth.to_le_bytes())?;
+            writer.write(&[len as u8])?;
+            for i in 0..len {
+                writer.write(&depths[i].to_le_bytes())?;
             }
         } else {
             writer.write(&[0])?;
@@ -654,54 +672,58 @@ impl CellData {
     }
 
     /// Binary deserialization of cell data
-    pub fn deserialize<T: Read>(reader: &mut T) -> std::io::Result<Self> {
+    pub fn deserialize<T: Read>(reader: &mut T) -> Result<Self> {
         let cell_type: CellType = FromPrimitive::from_u8(reader.read_byte()?)
-            .ok_or(ErrorKind::InvalidData)?;
+            .ok_or_else(|| std::io::Error::from(ErrorKind::InvalidData))?;
         let bit_length = reader.read_le_u16()?;
         let data_len = ((bit_length + 8) / 8) as usize;
         let mut data: Vec<u8> = vec![0; data_len];
         reader.read_exact(&mut data)?;
         let level_mask = reader.read_byte()?;
         let store_hashes = Self::read_bool(reader)?;
-        let hashes = Self::read_short_vector_opt(reader,
-                                                 |reader| Ok(UInt256::from(reader.read_u256()?)))?;
-        let depths = Self::read_short_vector_opt(reader,
-                                                 |reader| Ok(reader.read_le_u16()?))?;
+        let hashes = Self::read_short_array_opt(reader,
+                                               |reader| Ok(UInt256::from(reader.read_u256()?)))?;
+        let depths = Self::read_short_array_opt(reader,
+                                               |reader| Ok(reader.read_le_u16()?))?;
 
         Ok(Self::with_params(cell_type, data, level_mask, store_hashes, hashes, depths))
     }
 
-    fn read_short_vector_opt<R, T, F>(reader: &mut R, read_func: F) -> std::io::Result<Option<Vec<T>>>
+    fn read_short_array_opt<R, T, F>(reader: &mut R, read_func: F) -> Result<Option<[T; 4]>>
         where
             R: Read,
-            F: Fn(&mut R) -> std::io::Result<T>
+            T: Copy + Default,
+            F: Fn(&mut R) -> Result<T>
     {
         if Self::read_bool(reader)? {
-            Ok(Some(Self::read_short_vector(reader, read_func)?))
+            Ok(Some(Self::read_short_array(reader, read_func)?))
         } else {
             Ok(None)
         }
     }
 
-    fn read_short_vector<R, T, F>(reader: &mut R, read_func: F) -> std::io::Result<Vec<T>>
+    fn read_short_array<R, T, F>(reader: &mut R, read_func: F) -> Result<[T; 4]>
     where
         R: Read,
-        F: Fn(&mut R) -> std::io::Result<T>
+        T: Copy + Default,
+        F: Fn(&mut R) -> Result<T>
     {
         let count = reader.read_byte()?;
-        let mut result: Vec<T> = Vec::with_capacity(count as usize);
-        for _ in 0..count {
-            let value = read_func(reader)?;
-            result.push(value);
+        if count > 4 {
+            fail!("count too big {}", count)
+        }
+        let mut result = [T::default(); 4];
+        for i in 0..count {
+            result[i as usize] = read_func(reader)?;
         }
         Ok(result)
     }
 
-    fn read_bool<R: Read>(reader: &mut R) -> std::io::Result<bool> {
+    fn read_bool<R: Read>(reader: &mut R) -> Result<bool> {
         match reader.read_byte()? {
             1 => Ok(true),
             0 => Ok(false),
-            _ => Err(ErrorKind::InvalidData.into()),
+            _ => fail!(std::io::Error::from(ErrorKind::InvalidData))
         }
     }
 }
@@ -714,26 +736,24 @@ pub struct DataCell {
 
 impl DataCell {
 
-    pub fn new() -> DataCell {
-        // safe because of creating empty Cell
-        Self::with_params(vec!(), vec!(), CellType::Ordinary, 0, None, None).unwrap()
+    pub const fn new() -> Self {
+        Self {
+            cell_data: CellData::new(),
+            references: vec![],
+        }
     }
 
     pub fn with_params<TRefs>(refs: TRefs, data: Vec<u8>, cell_type: CellType, level_mask: u8, 
-        hashes: Option<Vec<UInt256>>, depths: Option<Vec<u16>>) -> Result<DataCell>  
+        hashes: Option<[UInt256; 4]>, depths: Option<[u16; 4]>) -> Result<DataCell>  
     where
         TRefs: IntoIterator<Item = Cell>
     {
         assert_eq!(hashes.is_some(), depths.is_some());
 
-        let refs = refs.into_iter();
-        let mut references: Vec<Cell> = vec![];
-        references.extend(refs);
         let store_hashes = hashes.is_some();
-        let mut cell = DataCell {
-            cell_data: CellData::with_params(cell_type, data, level_mask, store_hashes, hashes, depths),
-            references,
-        };
+        let cell_data = CellData::with_params(cell_type, data, level_mask, store_hashes, hashes, depths);
+        let references = refs.into_iter().collect::<Vec<Cell>>();
+        let mut cell = DataCell { cell_data, references };
         cell.finalize(true)?;
         Ok(cell)
     }
@@ -818,8 +838,8 @@ impl DataCell {
         // pruned cell stores all hashes except representetion in data
         let hashes_count = if is_pruned_cell { 1 } else { self.level() as usize + 1 };
         
-        let mut depths = vec![0_u16; hashes_count];
-        let mut hashes = Vec::with_capacity(hashes_count);
+        let mut depths = [0_u16; 4];
+        let mut hashes = [UInt256::MIN; 4];
         for i in 0..hashes_count {
             let mut hasher = Sha256::new();
 
@@ -842,7 +862,7 @@ impl DataCell {
                 let data_size = (bit_len / 8) + if bit_len % 8 != 0 { 1 } else { 0 };
                 hasher.input(&self.data()[..data_size]);
             } else {
-                hasher.input(hashes.last().unwrap());
+                hasher.input(hashes[i - 1].as_slice());
             }
 
             // depth
@@ -858,15 +878,16 @@ impl DataCell {
                 hasher.input(child_hash.as_slice());
             }
 
-            hashes.push(UInt256::from(hasher.result().to_vec()));
+            hashes[i] = UInt256::from(hasher.result().to_vec());
+            // debug_assert_ne!(hashes[i], UInt256::DEFAULT_CELL_HASH);
         }
 
         if self.store_hashes() {
             if Some(&depths) != self.depths() {
-                fail!(ExceptionCode::FatalError)
+                fail!("store_hashes set and depths do not equal to self.depths")
             }
             if Some(&hashes) != self.hashes() {
-                fail!(ExceptionCode::FatalError)
+                fail!("store_hashes set and hashes do not equal to self.hashes")
             }
         } else {
             self.set_hashes(Some(hashes));
@@ -879,19 +900,19 @@ impl DataCell {
         &self.cell_data
     }
 
-    fn hashes(&self) -> Option<&Vec<UInt256>> {
+    fn hashes(&self) -> Option<&[UInt256; 4]> {
         self.cell_data.hashes()
     }
 
-    fn set_hashes(&mut self, hashes: Option<Vec<UInt256>>) {
+    fn set_hashes(&mut self, hashes: Option<[UInt256; 4]>) {
         self.cell_data.set_hashes(hashes)
     }
 
-    fn depths(&self) -> Option<&Vec<u16>> {
+    fn depths(&self) -> Option<&[u16; 4]> {
         self.cell_data.depths()
     }
 
-    fn set_depths(&mut self, depths: Option<Vec<u16>>) {
+    fn set_depths(&mut self, depths: Option<[u16; 4]>) {
         self.cell_data.set_depths(depths)
     }
 }
