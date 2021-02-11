@@ -135,6 +135,14 @@ impl From<Cell> for SliceData {
 }
 
 impl SliceData {
+    // TODO: need to be const
+    pub fn default() -> SliceData {
+        Self {
+            cell: Cell::default(),
+            data_window: 0..0,
+            references_window: 0..0,
+        }
+    }
     pub fn new_empty() -> SliceData {
         SliceData::default()
     }

@@ -37,19 +37,12 @@ impl fmt::Display for PfxHashmapE {
 
 impl PfxHashmapE {
     /// constructs with bit_len
-    pub fn with_bit_len(bit_len: usize) -> Self {
+    pub const fn with_bit_len(bit_len: usize) -> Self {
         Self::with_hashmap(bit_len, None)
     }
-    /// construct with bit_len and data representing dictionary
-    pub fn with_data(bit_len: usize, data: SliceData) -> Self {
-        Self::with_hashmap(bit_len, data.reference_opt(0))
-    }
     /// construct with bit_len and root representing Hashmap
-    pub fn with_hashmap(bit_len: usize, data: Option<Cell>) -> Self {
-        Self {
-            bit_len,
-            data: data
-        }
+    pub const fn with_hashmap(bit_len: usize, data: Option<Cell>) -> Self {
+        Self { bit_len, data }
     }
     /// gets value from hahsmap
     pub fn get(&self, key: SliceData) -> Leaf {

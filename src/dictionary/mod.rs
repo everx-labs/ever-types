@@ -580,7 +580,7 @@ pub trait HashmapType {
         if let Some(root) = self.data() {
             let mut bit_len = self.bit_len();
             let mut cursor = LabelReader::with_cell(root);
-            let key = cursor.get_label_raw(&mut bit_len, Default::default())?;
+            let key = cursor.get_label_raw(&mut bit_len, BuilderData::default())?;
             if bit_len == 0 {
                 return Ok(Some((key, cursor.remainder()?)))
             }
