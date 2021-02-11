@@ -72,13 +72,14 @@ impl Default for BuilderData {
 }
 
 impl BuilderData {
-    pub fn new() -> BuilderData {
+    pub const fn default() -> Self { Self::new() }
+    pub const fn new() -> Self {
         BuilderData {
-            data: Vec::with_capacity(EXACT_CAPACITY),
+            data: Vec::new(),
             length_in_bits: 0,
             references: vec![],
             cell_type: CellType::Ordinary,
-            level_mask: LevelMask::with_mask(0),
+            level_mask: LevelMask(0),
         }
     }
 

@@ -76,6 +76,12 @@ impl PartialEq<&UInt256> for UInt256 {
 }
 
 impl UInt256 {
+
+    pub const fn default() -> Self { Self::new() }
+    pub const fn new() -> Self {
+        Self::ZERO
+    }
+
     pub fn is_zero(&self) -> bool {
         for b in &self.0 {
             if b != &0 {
@@ -85,7 +91,7 @@ impl UInt256 {
         true
     }
 
-    pub fn as_slice(&self) -> &[u8;32] {
+    pub const fn as_slice(&self) -> &[u8;32] {
         &self.0
     }
 
@@ -107,10 +113,11 @@ impl UInt256 {
         UInt256::from(sha2::Sha256::digest(bytes).as_slice())
     }
 
-    pub fn max() -> Self {
-        UInt256([0xFF; 32])
+    pub const fn max() -> Self {
+        UInt256::MAX
     }
 
+    pub const ZERO: UInt256 = UInt256([0; 32]);
     pub const MIN: UInt256 = UInt256([0; 32]);
     pub const MAX: UInt256 = UInt256([0xFF; 32]);
     // hash of default cell 0x96a296d224f285c67bee93c30f8a309157f0daa35dc5b87e410b78630a09cfc7;
