@@ -14,7 +14,7 @@
 use crate::cell::SliceData;
 use num::FromPrimitive;
 use sha2::Digest;
-use std::{fmt, fmt::{LowerHex, UpperHex}, cmp, str};
+use std::{fmt, fmt::{LowerHex, UpperHex}, cmp, str, convert::TryInto};
 
 
 pub type Result<T> = std::result::Result<T, failure::Error>;
@@ -113,6 +113,15 @@ impl UInt256 {
         UInt256::from(sha2::Sha256::digest(bytes).as_slice())
     }
 
+    pub fn first_u64(&self) -> u64 {
+        u64::from_le_bytes(self.0[0..8].try_into().unwrap())
+    }
+
+    pub fn from_raw(data: Vec<u8>, length: usize) -> Self {
+        debug_assert_eq!(length, 256);
+        UInt256::from(data)
+    }
+
     pub const fn max() -> Self {
         UInt256::MAX
     }
@@ -128,6 +137,12 @@ impl UInt256 {
 impl From<[u8;32]> for UInt256 {
     fn from(data: [u8;32]) -> Self {
         UInt256(data)
+    }
+}
+
+impl Into<SliceData> for &UInt256 {
+    fn into(self) -> SliceData {
+        SliceData::from_raw(self.0.to_vec(), 256)
     }
 }
 
