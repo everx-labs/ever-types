@@ -81,6 +81,9 @@ impl UInt256 {
     pub const fn new() -> Self {
         Self::ZERO
     }
+    pub const fn with_array(data: [u8; 32]) -> Self {
+        Self(data)
+    }
 
     pub fn is_zero(&self) -> bool {
         for b in &self.0 {
