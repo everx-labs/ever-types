@@ -65,6 +65,36 @@ impl From<&mut BuilderData> for SliceData {
     }
 }
 
+impl From<&&Cell> for BuilderData {
+    fn from(cell: &&Cell) -> Self {
+        let mut builder = BuilderData::with_bitstring(cell.data().to_vec()).unwrap();
+        builder.references = cell.clone_references();
+        builder.cell_type = cell.cell_type();
+        builder.level_mask = cell.level_mask();
+        builder
+    }
+}
+
+impl From<&Cell> for BuilderData {
+    fn from(cell: &Cell) -> Self {
+        let mut builder = BuilderData::with_bitstring(cell.data().to_vec()).unwrap();
+        builder.references = cell.clone_references();
+        builder.cell_type = cell.cell_type();
+        builder.level_mask = cell.level_mask();
+        builder
+    }
+}
+
+impl From<Cell> for BuilderData {
+    fn from(cell: Cell) -> Self {
+        let mut builder = BuilderData::with_bitstring(cell.data().to_vec()).unwrap();
+        builder.references = cell.clone_references();
+        builder.cell_type = cell.cell_type();
+        builder.level_mask = cell.level_mask();
+        builder
+    }
+}
+
 impl Default for BuilderData {
     fn default() -> Self {
         BuilderData::new()
@@ -129,14 +159,6 @@ impl BuilderData {
         } else {
             BuilderData::with_raw(data, length_in_bits)
         }
-    }
-
-    pub fn from(cell: &Cell) -> BuilderData {
-        let mut builder = BuilderData::with_bitstring(cell.data().to_vec()).unwrap();
-        builder.references = cell.clone_references();
-        builder.cell_type = cell.cell_type();
-        builder.level_mask = cell.level_mask();
-        builder
     }
 
     pub fn into_cell(mut self) -> Result<Cell> {
