@@ -413,9 +413,9 @@ pub trait HashmapType {
         builder.checked_append_references_and_data(data)?;
         Ok(builder)
     }
-    fn make_cell_with_label_and_builder(key: SliceData, max: usize, _is_leaf: bool, data: BuilderData) -> Result<BuilderData> {
+    fn make_cell_with_label_and_builder(key: SliceData, max: usize, _is_leaf: bool, data: &BuilderData) -> Result<BuilderData> {
         let mut builder = Self::make_cell_with_label(key, max)?;
-        builder.append_builder(&data)?;
+        builder.append_builder(data)?;
         Ok(builder)
     }
     fn make_cell_with_remainder(key: SliceData, max: usize, remainder: &SliceData) -> Result<BuilderData> {
@@ -505,7 +505,7 @@ pub trait HashmapType {
     fn hashmap_set_with_mode(
         &mut self,
         key: SliceData,
-        leaf: &SliceData,
+        leaf: &BuilderData,
         gas_consumer: &mut dyn GasConsumer,
         mode: u8
     ) -> Leaf {
@@ -517,7 +517,7 @@ pub trait HashmapType {
             *self.data_mut() = Some(root);
             result
         } else if mode.bit(ADD) {
-            let cell = gas_consumer.finalize_cell(Self::make_cell_with_label_and_data(key, bit_len, true, leaf)?)?;
+            let cell = gas_consumer.finalize_cell(Self::make_cell_with_label_and_builder(key, bit_len, true, leaf)?)?;
             *self.data_mut() = Some(cell);
             Ok(None)
         } else {
@@ -534,7 +534,7 @@ pub trait HashmapType {
     ) -> Leaf {
         let mut builder = BuilderData::default();
         builder.checked_append_reference(value.clone())?;
-        self.hashmap_set_with_mode(key, &builder.into(), gas_consumer, mode)
+        self.hashmap_set_with_mode(key, &builder, gas_consumer, mode)
     }
 
     /// iterate all elements with callback function
@@ -993,7 +993,7 @@ fn put_to_fork_with_mode<T: HashmapType + ?Sized>(
     slice: &mut SliceData, // TODO: BuilderData
     bit_len: usize,
     mut key: SliceData,
-    leaf: &SliceData,
+    leaf: &BuilderData,
     gas_consumer: &mut dyn GasConsumer,
     mode: u8
 ) -> Leaf {
@@ -1025,7 +1025,7 @@ fn put_to_node_with_mode<T: HashmapType + ?Sized>(
     cell: &mut Cell,
     bit_len: usize,
     key: SliceData,
-    leaf: &SliceData,
+    leaf: &BuilderData,
     gas_consumer: &mut dyn GasConsumer,
     mode: u8
 ) -> Leaf {
@@ -1037,7 +1037,7 @@ fn put_to_node_with_mode<T: HashmapType + ?Sized>(
         if T::is_leaf(&mut slice) {
             result = Ok(Some(slice));
             if mode.bit(REPLACE) {
-                *cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(key, bit_len, true, leaf)?)?;
+                *cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_builder(key, bit_len, true, leaf)?)?;
             }
         } else {
             fail!(ExceptionCode::FatalError)
@@ -1116,7 +1116,7 @@ fn slice_edge<T: HashmapType + ?Sized>(
     prefix: SliceData,
     mut label: SliceData,
     mut key: SliceData,
-    leaf: &SliceData,
+    leaf: &BuilderData,
     gas_consumer: &mut dyn GasConsumer
 ) -> Result<BuilderData> {
     key.shrink_data(1..);
@@ -1126,7 +1126,7 @@ fn slice_edge<T: HashmapType + ?Sized>(
     // Remainder of tree
     let existing_cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(label, length, is_leaf, &slice)?)?;
     // Leaf for fork
-    let another_cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(key, length, true, leaf)?)?;
+    let another_cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_builder(key, length, true, leaf)?)?;
     let (builder, _remainder) = T::make_fork(&prefix, bit_len, existing_cell, another_cell, label_bit)?;
     Ok(builder)
 }

@@ -53,12 +53,21 @@ impl PfxHashmapE {
     }
     /// sets value as SliceData
     pub fn set(&mut self, key: SliceData, value: &SliceData) -> Leaf {
+        self.hashmap_set_with_mode(key, &BuilderData::from_slice(value), &mut 0, ADD | REPLACE)
+    }
+    pub fn set_builder(&mut self, key: SliceData, value: &BuilderData) -> Leaf {
         self.hashmap_set_with_mode(key, value, &mut 0, ADD | REPLACE)
     }
     pub fn set_with_gas(&mut self, key: SliceData, value: &SliceData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
+        self.hashmap_set_with_mode(key, &BuilderData::from_slice(value), gas_consumer, ADD | REPLACE)
+    }
+    pub fn set_builder_with_gas(&mut self, key: SliceData, value: &BuilderData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
         self.hashmap_set_with_mode(key, value, gas_consumer, ADD | REPLACE)
     }
     pub fn replace_with_gas(&mut self, key: SliceData, value: &SliceData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
+        self.hashmap_set_with_mode(key, &BuilderData::from_slice(value), gas_consumer, REPLACE)
+    }
+    pub fn replace_builder_with_gas(&mut self, key: SliceData, value: &BuilderData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
         self.hashmap_set_with_mode(key, value, gas_consumer, REPLACE)
     }
     /// sets value as reference in empty SliceData
@@ -216,6 +225,12 @@ impl HashmapType for PfxHashmapE {
         let mut builder = hm_label(&key, max)?;
         builder.append_bit_bool(!is_leaf)?;
         builder.checked_append_references_and_data(data)?;
+        Ok(builder)
+    }
+    fn make_cell_with_label_and_builder(key: SliceData, max: usize, is_leaf: bool, data: &BuilderData) -> Result<BuilderData> {
+        let mut builder = hm_label(&key, max)?;
+        builder.append_bit_bool(!is_leaf)?;
+        builder.append_builder(&data)?;
         Ok(builder)
     }
     fn make_fork(key: &SliceData, bit_len: usize, mut left: Cell, mut right: Cell, swap: bool) -> Result<(BuilderData, SliceData)> {
