@@ -12,7 +12,7 @@
 */
 
 use std::cmp;
-use std::convert::From;
+use std::convert::TryInto;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::mem;
@@ -492,6 +492,11 @@ impl SliceData {
         }
         self.move_by(128)?;
         Ok(value)
+    }
+
+    pub fn get_next_hash(&mut self) -> Result<UInt256> {
+        let hash: [u8; 32] = self.get_next_bytes(32)?.try_into().unwrap();
+        Ok(UInt256::from(hash))
     }
 
     pub fn get_next_bytes(&mut self, bytes: usize) -> Result<Vec<u8>> {

@@ -94,7 +94,7 @@ impl UInt256 {
         true
     }
 
-    pub const fn as_slice(&self) -> &[u8;32] {
+    pub const fn as_slice(&self) -> &[u8; 32] {
         &self.0
     }
 
@@ -109,11 +109,12 @@ impl UInt256 {
             44 => base64::decode(value)?,
             _ => fail!("invalid account ID string length (64 expected)")
         };
-        Ok(UInt256::from(bytes))
+        Ok(Self(bytes.try_into().unwrap()))
     }
 
     pub fn calc_file_hash(bytes: &[u8]) -> Self {
-        UInt256::from(sha2::Sha256::digest(bytes).as_slice())
+        let hash: [u8; 32] = sha2::Sha256::digest(bytes).into();
+        Self(hash)
     }
 
     pub fn first_u64(&self) -> u64 {
@@ -121,12 +122,39 @@ impl UInt256 {
     }
 
     pub fn from_raw(data: Vec<u8>, length: usize) -> Self {
-        debug_assert_eq!(length, 256);
-        UInt256::from(data)
+        assert_eq!(length, 256);
+        let hash: [u8; 32] = data.try_into().unwrap();
+        Self(hash)
+    }
+
+    pub fn from_slice(value: &[u8]) -> Self {
+        match value.try_into() {
+            Ok(hash) => Self(hash),
+            Err(_) => Self::from_le_bytes(value)
+        }
+    }
+
+    pub fn from_be_bytes(value: &[u8]) -> Self {
+        let mut data = [0; 32];
+        let len = cmp::min(value.len(), 32);
+        let offset = 32 - len;
+        (0..len).for_each(|i| data[i + offset] = value[i]);
+        Self(data)
+    }
+
+    pub fn from_le_bytes(value: &[u8]) -> Self {
+        let mut data = [0; 32];
+        let len = cmp::min(value.len(), 32);
+        (0..len).for_each(|i| data[i] = value[i]);
+        Self(data)
     }
 
     pub const fn max() -> Self {
         UInt256::MAX
+    }
+
+    pub fn rand() -> Self {
+        Self((0..32).map(|_| { rand::random::<u8>() }).collect::<Vec<u8>>().try_into().unwrap())
     }
 
     pub const ZERO: UInt256 = UInt256([0; 32]);
@@ -137,8 +165,8 @@ impl UInt256 {
         195, 15, 138, 48, 145, 87, 240, 218, 163, 93, 197, 184, 126, 65, 11, 120, 99, 10, 9, 207, 199]);
 }
 
-impl From<[u8;32]> for UInt256 {
-    fn from(data: [u8;32]) -> Self {
+impl From<[u8; 32]> for UInt256 {
+    fn from(data: [u8; 32]) -> Self {
         UInt256(data)
     }
 }
@@ -149,36 +177,36 @@ impl Into<SliceData> for &UInt256 {
     }
 }
 
-impl Into<[u8;32]> for UInt256 {
+impl Into<[u8; 32]> for UInt256 {
     fn into(self) -> [u8; 32] {
         self.0
     }
 }
 
-impl<'a> Into<&'a [u8;32]> for &'a UInt256 {
+impl<'a> Into<&'a [u8; 32]> for &'a UInt256 {
     fn into(self) -> &'a [u8; 32] {
         &self.0
     }
 }
 
-impl<'a> From<&'a [u8;32]> for UInt256 {
-    fn from(data: &[u8;32]) -> Self {
+impl<'a> From<&'a [u8; 32]> for UInt256 {
+    fn from(data: &[u8; 32]) -> Self {
         UInt256(data.clone())
     }
 }
 
+// to be deleted
 impl From<&[u8]> for UInt256 {
-    fn from(value: &[u8]) -> Self {
-        let mut data = [0; 32];
-        let len = cmp::min(value.len(), 32);
-        (0..len).for_each(|i| data[i] = value[i]);
-        Self(data)
-    }
+    fn from(value: &[u8]) -> Self { Self::from_le_bytes(value) }
 }
 
+// to be deleted
 impl From<Vec<u8>> for UInt256 {
     fn from(value: Vec<u8>) -> Self {
-        UInt256::from(value.as_slice())
+        match value.try_into() {
+            Ok(hash) => Self(hash),
+            Err(value) => UInt256::from_le_bytes(value.as_slice())
+        }
     }
 }
 

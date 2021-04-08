@@ -30,9 +30,9 @@ failure ="0.1.6"
 hex = "^0.4.0"
 log = "0.4.8"
 num = "^0.2"
-sha2 = "^0.8"
 num-traits = "^0.2"
 num-derive = "^0.3"
+rand = "^0.8.3"
+sha2 = "^0.8"
 
 
-rand = "0.7.3"
