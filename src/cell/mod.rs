@@ -596,14 +596,13 @@ impl CellData {
             // pruned cell stores all hashes (except representation) in data
             if index != self.level() as usize {
                 let offset = 1 + 1 + index * SHA256_SIZE;
-                self.data()[offset..offset + SHA256_SIZE].into()
+                UInt256::from_slice(&self.data()[offset..offset + SHA256_SIZE])
             } else if let Some(hashes) = self.hashes.as_ref() {
                 hashes[0].clone()
             } else {
                 unreachable!("cell is not finalized")
             }
-        }
-        else if let Some(hashes) = self.hashes().as_ref() {
+        } else if let Some(hashes) = self.hashes().as_ref() {
             hashes.get(index as usize).cloned().expect("cell is not finalized")
         } else {
             unreachable!("cell is not finalized")
@@ -878,7 +877,7 @@ impl DataCell {
                 hasher.input(child_hash.as_slice());
             }
 
-            hashes[i] = UInt256::from(hasher.result().to_vec());
+            hashes[i] = From::<[u8; 32]>::from(hasher.result().into());
             // debug_assert_ne!(hashes[i], UInt256::DEFAULT_CELL_HASH);
         }
 
