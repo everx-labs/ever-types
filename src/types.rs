@@ -63,6 +63,24 @@ impl PartialEq<SliceData> for UInt256 {
     }
 }
 
+impl PartialEq<SliceData> for &UInt256 {
+    fn eq(&self, other: &SliceData) -> bool {
+        if other.remaining_bits() == 256 {
+            return &self.0 == other.get_bytestring(0).as_slice()
+        }
+        return false
+    }
+}
+
+impl PartialEq<Vec<u8>> for UInt256 {
+    fn eq(&self, other: &Vec<u8>) -> bool {
+        if other.len() == 32 {
+            return &self.0 == other.as_slice()
+        }
+        return false
+    }
+}
+
 impl PartialEq<UInt256> for &UInt256 {
     fn eq(&self, other: &UInt256) -> bool {
         self.0 == other.0
