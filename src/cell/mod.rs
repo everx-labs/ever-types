@@ -643,7 +643,7 @@ impl CellData {
         writer.write(&[if self.store_hashes { 1 } else { 0 }])?;
         if let Some(ref hashes) = self.hashes {
             let mut len = hashes.len();
-            if let Some(pos) = hashes.iter().position(|hash| hash == UInt256::MIN) {
+            if let Some(pos) = hashes.iter().position(|hash| hash == &UInt256::MIN) {
                 len = std::cmp::min(len, pos);
             }
             writer.write(&[1])?;
