@@ -16,7 +16,7 @@ use crate::types::{ExceptionCode, Result, UInt256, ByteOrderRead};
 use crate::cells_serialization::{SHA256_SIZE, BagOfCells};
 use std::sync::{Arc, Weak};
 use std::fmt;
-use std::ops::{BitOr, BitOrAssign};
+use std::ops::{BitOr, BitOrAssign, Deref};
 use sha2::{Sha256, Digest};
 use std::cmp::{max, min};
 use num::{FromPrimitive, ToPrimitive};
@@ -189,6 +189,10 @@ pub trait CellImpl: Sync + Send {
     fn is_pruned(&self) -> bool {
         self.cell_type() == CellType::PrunedBranch
     }
+
+    fn tree_bits_count(&self) -> u64 { unreachable!() }
+
+    fn tree_cell_count(&self) -> u64 { unreachable!() }
 }
 
 #[derive(Clone)]
@@ -404,6 +408,16 @@ impl Cell {
             }
         }
         Ok(indent)
+    }
+    fn tree_bits_count(&self) -> u64 { self.0.tree_bits_count() }
+
+    fn tree_cell_count(&self) -> u64 { self.0.tree_cell_count() }
+}
+
+impl Deref for Cell {
+    type Target = dyn CellImpl;
+    fn deref(&self) -> &Self::Target {
+        self.0.deref()
     }
 }
 
@@ -731,6 +745,8 @@ impl CellData {
 pub struct DataCell {
     cell_data: CellData,
     references: Vec<Cell>,
+    tree_bits_count: u64,
+    tree_cell_count: u64,
 }
 
 impl DataCell {
@@ -739,6 +755,8 @@ impl DataCell {
         Self {
             cell_data: CellData::new(),
             references: vec![],
+            tree_bits_count: 0,
+            tree_cell_count: 1,
         }
     }
 
@@ -751,8 +769,20 @@ impl DataCell {
 
         let store_hashes = hashes.is_some();
         let cell_data = CellData::with_params(cell_type, data, level_mask, store_hashes, hashes, depths);
-        let references = refs.into_iter().collect::<Vec<Cell>>();
-        let mut cell = DataCell { cell_data, references };
+        let mut references = Vec::new();
+        let mut tree_bits_count = cell_data.bit_length as u64;
+        let mut tree_cell_count = 1;
+        for reference in refs.into_iter() {
+            tree_bits_count += reference.tree_bits_count();
+            tree_cell_count += reference.tree_cell_count();
+            references.push(reference);
+        }
+        let mut cell = DataCell {
+            cell_data,
+            references,
+            tree_bits_count,
+            tree_cell_count,
+        };
         cell.finalize(true)?;
         Ok(cell)
     }
@@ -956,6 +986,10 @@ impl CellImpl for DataCell {
     fn store_hashes(&self) -> bool {
         self.cell_data().store_hashes()
     }
+
+    fn tree_bits_count(&self) -> u64 { self.tree_bits_count }
+
+    fn tree_cell_count(&self) -> u64 { self.tree_cell_count }
 }
 
 #[derive(Clone)]
@@ -1039,6 +1073,10 @@ impl CellImpl for UsageCell {
     fn store_hashes(&self) -> bool {
         self.cell.store_hashes()
     }
+
+    fn tree_bits_count(&self) -> u64 { self.cell.tree_bits_count() }
+
+    fn tree_cell_count(&self) -> u64 { self.cell.tree_cell_count() }
 }
 
 #[derive(Clone)]
@@ -1096,6 +1134,10 @@ impl CellImpl for VirtualCell {
     fn store_hashes(&self) -> bool {
         self.cell.store_hashes()
     }
+
+    fn tree_bits_count(&self) -> u64 { self.cell.tree_bits_count() }
+
+    fn tree_cell_count(&self) -> u64 { self.cell.tree_cell_count() }
 }
 
 #[derive(Default)]
