@@ -18,7 +18,7 @@
 edition = "2018"
 build = "build.rs"
 name = "ton_types"
-version = "1.0.29"
+version = "1.2.12"
 
 [dependencies]
 lockfree = { git = "https://github.com/tonlabs/lockfree.git" }
