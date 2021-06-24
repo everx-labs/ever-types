@@ -46,9 +46,9 @@ pub enum BocSerialiseMode {
 #[derive(Clone, Debug, PartialEq)]
 pub struct BagOfCells {
     cells: HashMap<UInt256, Cell>,
-    sorted: Vec<UInt256>,
+    sorted_rev: Vec<UInt256>,
     absent: HashSet<UInt256>,
-    roots_count: usize,
+    roots_indexes_rev: Vec<usize>,
     absent_count: usize,
 }
 
@@ -63,28 +63,26 @@ impl BagOfCells {
     
     pub fn with_roots_and_absent(root_cells: Vec<&Cell>, absent_cells: Vec<&Cell>) -> Self {
         let mut	cells = HashMap::<UInt256, Cell>::new();
-        let mut sorted = Vec::<UInt256>::new();
+        let mut sorted_rev = Vec::<UInt256>::new();
         let mut absent_cells_hashes = HashSet::<UInt256>::new();
-        let mut roots = Vec::<UInt256>::new();
-                
+
         for cell in absent_cells.iter() {
             absent_cells_hashes.insert(cell.repr_hash());
         }
 
+        let mut roots_indexes_rev = Vec::with_capacity(root_cells.len());
         for root_cell in root_cells.iter() {
-            Self::traverse(root_cell, &mut cells, &mut sorted, &absent_cells_hashes);
-            
-            // roots must be firtst at final list, so it stored in separate list 
-            roots.push(sorted.pop().unwrap());
+            Self::traverse(root_cell, &mut cells, &mut sorted_rev, &absent_cells_hashes);
+            roots_indexes_rev.push(sorted_rev.len() - 1); // root must be added into `sorted_rev` back
         }
 
         // roots must be firtst
         // TODO: due to real ton sorces it is not necceary to write roots first
         BagOfCells {
             cells: cells,
-            sorted: roots.iter().chain(sorted.iter().rev()).map(|h| h.clone()).collect(),
+            sorted_rev,
             absent: absent_cells_hashes,
-            roots_count: root_cells.len(),
+            roots_indexes_rev,
             absent_count: absent_cells.len(),
         }
     }
@@ -97,20 +95,20 @@ impl BagOfCells {
         self.cells
     }
 
-    pub fn sorted_cells_hashes(&self) -> &Vec<UInt256> {
-        &self.sorted
+    pub fn sorted_cells_hashes(&self) -> impl Iterator<Item = &UInt256> {
+        self.sorted_rev.iter().rev()
     }
 
     pub fn roots_count(&self) -> usize {
-        self.roots_count
+        self.roots_indexes_rev.len()
     }
 
     pub fn cells_count(&self) -> usize {
-        self.sorted.len()
+        self.sorted_rev.len()
     }
 
     pub fn get_cell_by_index(&self, index: usize) -> Option<Cell> {
-        if let Some(hash) = self.sorted.get(index) {
+        if let Some(hash) = self.sorted_rev.get(index) {
             if let Some(cell) = self.cells.get(hash) {
                 return Some(cell.clone());
             } else {
@@ -205,23 +203,22 @@ impl BagOfCells {
 
         dest.write(&[offset_size as u8])?; // off_bytes:(## 8) { off_bytes <= 8 }
         dest.write_all(&(self.cells.len() as u64).to_be_bytes()[(8-ref_size)..8])?;
-        dest.write_all(&(self.roots_count as u64).to_be_bytes()[(8-ref_size)..8])?;
+        dest.write_all(&(self.roots_count() as u64).to_be_bytes()[(8-ref_size)..8])?;
         dest.write_all(&(self.absent_count as u64).to_be_bytes()[(8-ref_size)..8])?;
         dest.write_all(&(total_cells_size as u64).to_be_bytes()[(8-offset_size)..8])?;
 
         // Root list 
         if include_root_list {
             // Write root's indexes 
-            // TODO: due to real ton sorces it is not necceary to write roots first
-            for i in 0..self.roots_count {
-                dest.write_all(&(i as u64).to_be_bytes()[(8-ref_size)..8])?;
+            for index in self.roots_indexes_rev.iter() {
+                dest.write_all(&((self.cells.len() - *index - 1) as u64).to_be_bytes()[(8-ref_size)..8])?;
             }
         }
 
         // Index
         if include_index { 
             let mut total_size = 0;
-            for cell_hash in self.sorted.iter() {
+            for cell_hash in self.sorted_rev.iter().rev() {
                 total_size += self.cell_serialized_size(&self.cells[cell_hash], ref_size);
                 let for_write = 
                     if !include_cache_bits { total_size }
@@ -235,12 +232,12 @@ impl BagOfCells {
 
         // Cells
         let mut hashes_to_indexes = HashMap::<&UInt256, u32>::new();
-        for (index, cell_hash) in self.sorted.iter().enumerate() {
+        for (index, cell_hash) in self.sorted_rev.iter().rev().enumerate() {
             hashes_to_indexes.insert(cell_hash, index as u32);
         }
 
         let mut cell_index = 0;
-        for cell_hash in self.sorted.iter() {
+        for cell_hash in self.sorted_rev.iter().rev() {
             if let Some(cell) = &self.cells.get(cell_hash) {
                 if self.absent.contains(cell_hash) {
                     Self::serialize_absent_cell(cell, dest)?;
@@ -355,9 +352,9 @@ impl BagOfCells {
 impl fmt::Display for BagOfCells {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "total unique cells: {}", self.cells.len())?;
-        for i in 0..self.roots_count() {
-            let root = &self.cells[&self.sorted[i]];
-            write!(f, "\nroot #{}:{}", i, root)?;
+        for (n, index) in self.roots_indexes_rev.iter().enumerate() {
+            let root = &self.cells[&self.sorted_rev[*index]];
+            write!(f, "\nroot #{}:{:#.1024}", n, root)?;
         }
         Ok(())
     }
@@ -461,12 +458,18 @@ pub fn deserialize_cells_tree_ex<T>(src: &mut T) -> Result<(Vec<Cell>, BocSerial
     let _tot_cells_size = src.read_be_uint(offset_size); // tot_cells_size:(##(off_bytes * 8))
 
     // Root list
-    if magic == BOC_GENERIC_TAG {
+
+    let roots_indexes = if magic == BOC_GENERIC_TAG {
         // root_list:(roots * ##(size * 8)) 
-        // TODO what is it? root's indexes?
-        let mut buf = vec!(0; roots_count * ref_size);
-        src.read(&mut buf)?;
-    }
+        let mut roots_indexes = Vec::with_capacity(roots_count);
+        for _ in 0..roots_count {
+            roots_indexes.push(src.read_be_uint(ref_size)?); // cells:(##(size * 8))
+        }
+        roots_indexes
+    } else {
+        Vec::with_capacity(0)
+    };
+
 
     // Index processing - extract cell's sizes to check and correct future deserialization 
     let mut cells_sizes = vec![0_usize; cells_count];
@@ -520,8 +523,12 @@ pub fn deserialize_cells_tree_ex<T>(src: &mut T) -> Result<(Vec<Cell>, BocSerial
     }
 
     let mut roots = Vec::with_capacity(roots_count);
-    for i in 0..roots_count {
-        roots.push(done_cells.get(&(i as u32)).unwrap().clone());
+    if magic == BOC_GENERIC_TAG {
+        for index in roots_indexes {
+            roots.push(done_cells.get(&(index as u32)).unwrap().clone());
+        }
+    } else {
+        roots.push(done_cells.get(&0).unwrap().clone());
     }
 
     if has_crc {

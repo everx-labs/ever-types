@@ -898,6 +898,9 @@ impl DataCell {
             for child in self.references.iter() {
                 let child_depth = child.depth(if is_merkle_cell { i + 1 } else { i });
                 depths[i] = max(depths[i], child_depth + 1);
+                if depths[i] > MAX_DEPTH {
+                    fail!(ExceptionCode::CellOverflow)
+                }
                 hasher.input(&child_depth.to_be_bytes());
             }
 
