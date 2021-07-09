@@ -11,7 +11,7 @@
 * limitations under the License.
 */
 
-use crate::cell::SliceData;
+use crate::cell::{BuilderData, SliceData};
 use num::FromPrimitive;
 use sha2::Digest;
 use std::{fmt, fmt::{LowerHex, UpperHex}, cmp, str, convert::TryInto};
@@ -189,12 +189,6 @@ impl From<[u8; 32]> for UInt256 {
     }
 }
 
-impl Into<SliceData> for &UInt256 {
-    fn into(self) -> SliceData {
-        SliceData::from_raw(self.0.to_vec(), 256)
-    }
-}
-
 impl Into<[u8; 32]> for UInt256 {
     fn into(self) -> [u8; 32] {
         self.0
@@ -272,14 +266,21 @@ pub type AccountId = SliceData;
 impl From<[u8; 32]> for AccountId {
     fn from(data: [u8; 32]) -> AccountId {
         let data = data.to_vec();
-        SliceData::from_raw(data, 256)
+        BuilderData::with_raw(data, 256).unwrap().into_cell().unwrap().into()
     }
 }
 
 impl From<UInt256> for AccountId {
     fn from(data: UInt256) -> AccountId {
         let data = data.0.to_vec();
-        SliceData::from_raw(data, 256)
+        BuilderData::with_raw(data, 256).unwrap().into_cell().unwrap().into()
+    }
+}
+
+impl From<&UInt256> for AccountId {
+    fn from(data: &UInt256) -> AccountId {
+        let data = data.0.to_vec();
+        BuilderData::with_raw(data, 256).unwrap().into_cell().unwrap().into()
     }
 }
 

@@ -24,7 +24,7 @@ use num::{FromPrimitive, ToPrimitive};
 pub const MAX_REFERENCES_COUNT: usize = 4;
 pub const MAX_DATA_BITS: usize = 1023;
 pub const MAX_LEVEL: usize = 3;
-pub const MAX_DEPTH: u16 = 1024;
+pub const MAX_DEPTH: u16 = u16::MAX - 1;
 
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy, Hash)]
@@ -551,12 +551,12 @@ impl CellData {
         }
     }
     pub fn with_params(cell_type: CellType, data: Vec<u8>, level_mask: u8, store_hashes: bool, hashes: Option<[UInt256; 4]>, depths: Option<[u16; 4]>) -> Self {
-        let bit_length = find_tag(&data) as u16;
-        assert!(bit_length < 1024);
+        let bit_length = find_tag(&data);
+        assert!(bit_length <= MAX_DATA_BITS);
         Self {
             cell_type,
             data,
-            bit_length,
+            bit_length: bit_length as u16,
             level_mask: LevelMask::with_mask(level_mask),
             store_hashes,
             hashes,
@@ -760,6 +760,24 @@ impl DataCell {
         }
     }
 
+    pub fn with_max_depth(references: Vec<Cell>, data: Vec<u8>, cell_type: CellType, level_mask: u8, max_depth: u16) -> Result<DataCell> {
+        let cell_data = CellData::with_params(cell_type, data, level_mask, false, None, None);
+        let mut tree_bits_count = cell_data.bit_length as u64;
+        let mut tree_cell_count = 1;
+        for reference in &references {
+            tree_bits_count += reference.tree_bits_count();
+            tree_cell_count += reference.tree_cell_count();
+        }
+        let mut cell = DataCell {
+            cell_data,
+            references,
+            tree_bits_count,
+            tree_cell_count,
+        };
+        cell.finalize(true, max_depth)?;
+        Ok(cell)
+    }
+
     pub fn with_params<TRefs>(refs: TRefs, data: Vec<u8>, cell_type: CellType, level_mask: u8, 
         hashes: Option<[UInt256; 4]>, depths: Option<[u16; 4]>) -> Result<DataCell>  
     where
@@ -783,11 +801,11 @@ impl DataCell {
             tree_bits_count,
             tree_cell_count,
         };
-        cell.finalize(true)?;
+        cell.finalize(true, 0)?;
         Ok(cell)
     }
 
-    fn finalize(&mut self, force: bool) -> Result<()> {
+    fn finalize(&mut self, force: bool, max_depth: u16) -> Result<()> {
 
         if !force && self.hashes().is_some() && self.depths().is_some() {
             return Ok(());
@@ -800,45 +818,58 @@ impl DataCell {
         match self.cell_type() {
             CellType::PrunedBranch => {
                 // type + level_mask + level * (hashes + depths)
-                if bit_len != 8 * (1 + 1 + (self.level() as usize) * (SHA256_SIZE + 2)) ||
-                    self.references.len() > 0
-                {
-                    fail!(ExceptionCode::CellOverflow)
+                if bit_len != 8 * (1 + 1 + (self.level() as usize) * (SHA256_SIZE + 2)) {
+                    fail!("fail creating pruned branch cell: {} != {}", bit_len, 8 * (1 + 1 + (self.level() as usize) * (SHA256_SIZE + 2)))
                 }
-                if self.data()[0] != u8::from(CellType::PrunedBranch) ||
-                   self.data()[1] != self.cell_data.level_mask.0 {
-                    fail!(ExceptionCode::FatalError)
+                if !self.references.is_empty() {
+                    fail!("fail creating pruned branch cell: references {} != 0", self.references.len())
                 }
-            },
+                if self.data()[0] != u8::from(CellType::PrunedBranch) {
+                    fail!("fail creating pruned branch cell: data[0] {} != {}", self.data()[0], u8::from(CellType::PrunedBranch))
+                }
+                if self.data()[1] != self.cell_data.level_mask.0 {
+                    fail!("fail creating pruned branch cell: data[1] {} != {}", self.data()[1], self.cell_data.level_mask.0)
+                }
+            }
             CellType::MerkleProof => {
                 // type + hash + depth
-                if bit_len != 8 * (1 + SHA256_SIZE + 2) ||
-                    self.references.len() != 1
-                {
-                    fail!(ExceptionCode::CellOverflow)
+                if bit_len != 8 * (1 + SHA256_SIZE + 2) {
+                    fail!("fail creating merkle proof cell: bit_len {} != {}", bit_len, 8 * (1 + SHA256_SIZE + 2))
+                }
+                if self.references.len() != 1 {
+                    fail!("fail creating merkle proof cell: references {} != 1", self.references.len())
                 }
                 // TODO check hashes and depths
             },
             CellType::MerkleUpdate => {
                 // type + 2 * (hash + depth)
-                if bit_len != 8 * (1 + 2 * (SHA256_SIZE + 2)) ||
-                    self.references.len() != 2
-                {
-                    fail!(ExceptionCode::CellOverflow)
+                if bit_len != 8 * (1 + 2 * (SHA256_SIZE + 2)) {
+                    fail!("fail creating merkle unpdate cell: bit_len {} != {}", bit_len, 8 * (1 + 2 * (SHA256_SIZE + 2)))
+                }
+                if self.references.len() != 2 {
+                    fail!("fail creating merkle unpdate cell: references {} != 2", self.references.len())
                 }
                 // TODO check hashes and depths
             },
             CellType::Ordinary => {
-                if bit_len > MAX_DATA_BITS || self.references.len() > MAX_REFERENCES_COUNT {
-                    fail!(ExceptionCode::CellOverflow)
+                if bit_len > MAX_DATA_BITS {
+                    fail!("fail creating ordinary cell: bit_len {} > {}", bit_len, MAX_DATA_BITS)
+                }
+                if self.references.len() > MAX_REFERENCES_COUNT {
+                    fail!("fail creating ordinary cell: references {} > {}", self.references.len(), MAX_REFERENCES_COUNT)
                 }
             },
             CellType::LibraryReference => {
-                if bit_len != 8 * (1 + SHA256_SIZE) || !self.references.is_empty() {
-                    fail!(ExceptionCode::CellOverflow)
+                if bit_len != 8 * (1 + SHA256_SIZE) {
+                    fail!("fail creating libray reference cell: bit_len {} != {}", bit_len, 8 * (1 + SHA256_SIZE))
+                }
+                if !self.references.is_empty() {
+                    fail!("fail creating libray reference cell: references {} != 0", self.references.len())
                 }
             }
-            CellType::Unknown => fail!(ExceptionCode::CellOverflow)
+            CellType::Unknown => {
+                fail!("fail creating unknown cell")
+            }
         }
 
         // Check level
@@ -898,8 +929,8 @@ impl DataCell {
             for child in self.references.iter() {
                 let child_depth = child.depth(if is_merkle_cell { i + 1 } else { i });
                 depths[i] = max(depths[i], child_depth + 1);
-                if depths[i] > MAX_DEPTH {
-                    fail!(ExceptionCode::CellOverflow)
+                if ((max_depth != 0) && (depths[i] > max_depth)) || (depths[i] > MAX_DEPTH) {
+                    fail!("fail creating cell: depth {} > {}", depths[i], std::cmp::max(max_depth, MAX_DEPTH))
                 }
                 hasher.input(&child_depth.to_be_bytes());
             }

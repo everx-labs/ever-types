@@ -161,7 +161,11 @@ impl BuilderData {
         }
     }
 
-    pub fn into_cell(mut self) -> Result<Cell> {
+    /// finalize cell allowing maximal depth
+    pub fn into_cell(self) -> Result<Cell> { self.finalize(0) }
+
+    /// use max_depth to limit depth
+    pub fn finalize(mut self, max_depth: u16) -> Result<Cell> {
         if self.cell_type == CellType::Ordinary {
             // For Ordinary cells - level is set automatically,
             // for other types - it must be set manually by set_level_mask()
@@ -172,13 +176,12 @@ impl BuilderData {
         append_tag(&mut self.data, self.length_in_bits);
 
         Ok(Cell::with_cell_impl(
-            DataCell::with_params(
+            DataCell::with_max_depth(
                 self.references,
                 self.data,
                 self.cell_type,
                 self.level_mask.mask(),
-                None,
-                None,
+                max_depth,
             )?
         ))
     }
@@ -192,18 +195,18 @@ impl BuilderData {
     }
 
     // TODO: refactor it compare directly in BuilderData
-    pub fn compare_data(&self, other: &Self) -> (Option<usize>, Option<usize>) {
+    pub fn compare_data(&self, other: &Self) -> Result<(Option<usize>, Option<usize>)> {
         if self == other {
-            return (None, None)
+            return Ok((None, None))
         }
-        let label1 = SliceData::from(self);
-        let label2 = SliceData::from(other);
+        let label1 = SliceData::from(self.clone().into_cell()?);
+        let label2 = SliceData::from(other.clone().into_cell()?);
         let (_prefix, rem1, rem2) = SliceData::common_prefix(&label1, &label2);
         // unwraps are safe because common_prefix returns None if slice is empty
-        (
+        Ok((
             rem1.map(|rem| rem.get_bits(0, 1).expect("check common_prefix function") as usize),
             rem2.map(|rem| rem.get_bits(0, 1).expect("check common_prefix function") as usize)
-        )
+        ))
     }
 
     pub fn from_slice(slice: &SliceData) -> BuilderData {
@@ -343,16 +346,12 @@ impl BuilderData {
         &mut self.level_mask
     }
 
-    pub fn append_reference(&mut self, child: BuilderData) {
-        self.references.push(Cell::from(child));
-    }
-
     pub fn append_reference_cell(&mut self, child: Cell) {
         self.references.push(child);
     }
 
-    pub fn prepend_reference(&mut self, child: BuilderData) {
-        self.references.insert(0, Cell::from(child));
+    pub fn prepend_reference_cell(&mut self, child: Cell) {
+        self.references.insert(0, child);
     }
 
     pub fn set_type(&mut self, cell_type: CellType) {
@@ -378,10 +377,19 @@ impl BuilderData {
     }
 }
 
+// use only for test purposes
+impl BuilderData {
+    pub fn append_reference(&mut self, child: BuilderData) {
+        self.references.push(child.into_cell().unwrap());
+    }
+    pub fn prepend_reference(&mut self, child: BuilderData) {
+        self.references.insert(0, child.into_cell().unwrap());
+    }
+}
+
 impl fmt::Display for BuilderData {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let cell: Cell = self.into();
-        write!(f, "{}", cell)
+        write!(f, "data: {} len: {} reference count: {}", hex::encode(&self.data), self.length_in_bits, self.references.len())
     }
 }
 

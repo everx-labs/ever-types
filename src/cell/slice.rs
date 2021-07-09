@@ -15,7 +15,6 @@ use std::cmp;
 use std::convert::TryInto;
 use std::fmt;
 use std::hash::{Hash, Hasher};
-use std::mem;
 use std::ops::{Bound, Range, RangeBounds};
 
 use num::{BigInt, bigint::Sign};
@@ -96,10 +95,15 @@ impl PartialEq for SliceData {
 
 impl Default for SliceData {
     fn default() -> Self {
-        Cell::default().into()
+        Self {
+            cell: Cell::default(),
+            data_window: 0..0,
+            references_window: 0..0,
+        }
     }
 }
 
+// TBD
 impl From<Vec<u8>> for SliceData {
     fn from(data: Vec<u8>) -> SliceData {
         let len = data.len();
@@ -107,6 +111,7 @@ impl From<Vec<u8>> for SliceData {
     }
 }
 
+// TBD
 impl From<&[u8]> for SliceData {
     fn from(data: &[u8]) -> SliceData {
         let len = data.len();
@@ -114,6 +119,7 @@ impl From<&[u8]> for SliceData {
     }
 }
 
+// TBD
 impl From<&Cell> for SliceData {
     fn from(cell: &Cell) -> SliceData {
         SliceData {
@@ -148,10 +154,11 @@ impl SliceData {
     }
 
     pub fn from_string(value: &str) -> Result<SliceData> {
-        parse_slice_base(value, 0, 16)
+        Ok(parse_slice_base(value, 0, 16)
             .ok_or_else(|| error!(ExceptionCode::FatalError))
-            .and_then(|vec| BuilderData::with_bitstring(vec))
-            .map(|builder| builder.into())
+            .and_then(|vec| BuilderData::with_bitstring(vec))?
+            .into_cell()?
+            .into())
     }
 
     pub fn remaining_references(&self) -> usize {
@@ -288,7 +295,7 @@ impl SliceData {
             && self.data_window.end == self.cell.bit_length() {
             self.cell.clone()
         } else {
-            BuilderData::from_slice(self).into()
+            BuilderData::from_slice(&self).into_cell().expect("it must not fail because builder made from cell cut by slice")
         }
     }
 
@@ -628,7 +635,7 @@ impl SliceData {
             let mut builder = BuilderData::from_slice(prefix);
             self.move_by(prefix.remaining_bits())?;
             builder.append_bytestring(self)?;
-            *self = builder.into();
+            *self = builder.into_cell()?.into();
             Ok(())
         }
     }
@@ -675,27 +682,29 @@ impl SliceData {
 }
 
 /// subject to move to tests
+/// it used from other repos
+/// need task
 impl SliceData {
     pub fn new(data: Vec<u8>) -> SliceData {
         match crate::find_tag(data.as_slice()) {
             0 => SliceData::default(),
-            length_in_bits => BuilderData::with_raw(data, length_in_bits).unwrap().into()
+            length_in_bits => BuilderData::with_raw(data, length_in_bits).unwrap().into_cell().unwrap().into()
         }
     }
 
     pub fn from_raw(data: Vec<u8>, length_in_bits: usize) -> SliceData {
-        BuilderData::with_raw(data, length_in_bits).unwrap().into()
+        BuilderData::with_raw(data, length_in_bits).unwrap().into_cell().unwrap().into()
     }
 
     pub fn append_reference(&mut self, other: SliceData) -> &mut SliceData {
         let mut builder = BuilderData::from_slice(self);
-        builder.append_reference(BuilderData::from_slice(&other));
-        *self = SliceData::from(builder);
+        builder.append_reference_cell(other.into_cell());
+        *self = builder.into_cell().expect("it should be used only in tests").into();
         self
     }
 
     pub fn withdraw(&mut self) -> SliceData {
-        mem::replace(self, SliceData::new_empty())
+        std::mem::replace(self, SliceData::new_empty())
     }
 }
 
