@@ -190,9 +190,9 @@ pub trait CellImpl: Sync + Send {
         self.cell_type() == CellType::PrunedBranch
     }
 
-    fn tree_bits_count(&self) -> u64 { unreachable!() }
+    fn tree_bits_count(&self) -> u64 { 0 }
 
-    fn tree_cell_count(&self) -> u64 { unreachable!() }
+    fn tree_cell_count(&self) -> u64 { 0 }
 }
 
 #[derive(Clone)]
@@ -446,7 +446,7 @@ impl PartialEq for Cell {
 
 impl PartialEq<UInt256> for Cell {
     fn eq(&self, other_hash: &UInt256) -> bool {
-        &self.repr_hash() == other_hash
+        self.repr_hash() == other_hash
     }
 }
 
@@ -612,7 +612,7 @@ impl CellData {
                 let offset = 1 + 1 + index * SHA256_SIZE;
                 UInt256::from_slice(&self.data()[offset..offset + SHA256_SIZE])
             } else if let Some(hashes) = self.hashes.as_ref() {
-                hashes[0].clone()
+                hashes[0]
             } else {
                 unreachable!("cell is not finalized")
             }
@@ -650,36 +650,36 @@ impl CellData {
 
     /// Binary serialization of cell data
     pub fn serialize<T: Write>(&self, writer: &mut T) -> Result<()> {
-        writer.write(&[self.cell_type.to_u8().unwrap()])?;
-        writer.write(&self.bit_length.to_le_bytes())?;
-        writer.write(&self.data[0..(self.bit_length as usize + 8) / 8])?;
-        writer.write(&[self.level_mask.0])?;
-        writer.write(&[if self.store_hashes { 1 } else { 0 }])?;
+        writer.write_all(&[self.cell_type.to_u8().unwrap()])?;
+        writer.write_all(&self.bit_length.to_le_bytes())?;
+        writer.write_all(&self.data[0..(self.bit_length as usize + 8) / 8])?;
+        writer.write_all(&[self.level_mask.0])?;
+        writer.write_all(&[if self.store_hashes { 1 } else { 0 }])?;
         if let Some(ref hashes) = self.hashes {
             let mut len = hashes.len();
-            if let Some(pos) = hashes.iter().position(|hash| hash == &UInt256::MIN) {
+            if let Some(pos) = hashes.iter().position(|hash| hash == UInt256::MIN) {
                 len = std::cmp::min(len, pos);
             }
-            writer.write(&[1])?;
-            writer.write(&[len as u8])?;
+            writer.write_all(&[1])?;
+            writer.write_all(&[len as u8])?;
             for i in 0..len {
-                writer.write(hashes[i].as_slice())?;
+                writer.write_all(hashes[i].as_slice())?;
             }
         } else {
-            writer.write(&[0])?;
+            writer.write_all(&[0])?;
         }
         if let Some(ref depths) = self.depths {
             let mut len = depths.len();
             if let Some(pos) = depths.iter().position(|depth| depth == &0) {
                 len = std::cmp::min(len, pos);
             }
-            writer.write(&[1])?;
-            writer.write(&[len as u8])?;
+            writer.write_all(&[1])?;
+            writer.write_all(&[len as u8])?;
             for i in 0..len {
-                writer.write(&depths[i].to_le_bytes())?;
+                writer.write_all(&depths[i].to_le_bytes())?;
             }
         } else {
-            writer.write(&[0])?;
+            writer.write_all(&[0])?;
         }
         Ok(())
     }

@@ -124,7 +124,9 @@ impl BuilderData {
             data.truncate(length_in_bits / 8);
         } else {
             data.truncate(1 + length_in_bits / 8);
-            data.last_mut().map(|last_byte| *last_byte = (*last_byte >> (8 - data_shift)) << (8 - data_shift));
+            if let Some(last_byte) = data.last_mut() {
+                *last_byte = (*last_byte >> (8 - data_shift)) << (8 - data_shift);
+            }
         }
         data.reserve_exact(EXACT_CAPACITY - data.len());
         Ok(BuilderData {
@@ -141,8 +143,7 @@ impl BuilderData {
         TRefs: IntoIterator<Item = Cell>
     {
         let mut builder = BuilderData::with_raw(data, length_in_bits)?;
-        let mut iter = refs.into_iter();
-        while let Some(value) = iter.next() {
+        for value in refs.into_iter() {
             builder.checked_append_reference(value)?;
         }
         Ok(builder)
@@ -212,7 +213,7 @@ impl BuilderData {
     pub fn from_slice(slice: &SliceData) -> BuilderData {
         let refs_count = slice.remaining_references();
         let references = (0..refs_count)
-            .map(|i| slice.reference(i).unwrap().clone())
+            .map(|i| slice.reference(i).unwrap())
             .collect::<Vec<_>>();
         
         let mut builder = slice.remaining_data();
