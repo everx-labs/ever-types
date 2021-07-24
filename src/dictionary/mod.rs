@@ -268,7 +268,10 @@ impl SliceData {
 impl SliceData {
     pub fn is_empty_root(&self) -> bool {
         self.is_empty() || 
-        matches!(self.get_bits(0, 1), Ok(0))
+        match self.get_bits(0, 1) {
+            Ok(0) => true,
+            _ => false
+        }
     }
     pub fn get_dictionary(&mut self) -> Result<SliceData> {
         self.get_dictionary_opt().ok_or_else(|| error!(ExceptionCode::CellUnderflow))
@@ -312,14 +315,14 @@ fn find_leaf<T: HashmapType + ?Sized>(
             if key_bit != next {
                 Ok(None)
             } else {
-                get_min_max::<T>(data, path, bit_len, next_index, next, gas_consumer)
+                return get_min_max::<T>(data, path, bit_len, next_index, next, gas_consumer)
             }
         }
         (_, None, None) => if eq { // same leaf found
             path.append_bytestring(&label)?;
-            Ok(Some(cursor))
+            return Ok(Some(cursor))
         } else {
-            Ok(None)
+            return Ok(None)
         }
         (prefix_opt, Some(remainder), None) => { // label fully in key
             if !T::is_fork(&mut cursor)? {
@@ -342,7 +345,7 @@ fn find_leaf<T: HashmapType + ?Sized>(
             path.trunc(length_in_bits)?;
             path.append_bit_bool(key_bit == 0)?;
             data = cursor.reference(1 - key_bit)?;
-            get_min_max::<T>(data, path, bit_len, next_index, next_index, gas_consumer)
+            return get_min_max::<T>(data, path, bit_len, next_index, next_index, gas_consumer)
         }
     }
 }
@@ -831,7 +834,7 @@ where
             return Ok(false)
         }
     }
-    Ok(true)
+    return Ok(true)
 }
 fn dict_scan_diff<T, F>(
     cell_1: Option<Cell>,
@@ -1005,7 +1008,7 @@ fn put_to_fork_with_mode<T: HashmapType + ?Sized>(
         if next_index == 1 {
             builder.checked_append_reference(slice.checked_drain_reference()?)?;
         }
-        let mut cell = slice.checked_drain_reference()?;
+        let mut cell = slice.checked_drain_reference()?.clone();
         let bit_len = bit_len.checked_sub(1).ok_or(ExceptionCode::CellUnderflow)?;
         result = put_to_node_with_mode::<T>(&mut cell, bit_len, key, leaf, gas_consumer, mode);
         builder.checked_append_reference(cell)?;
@@ -1257,14 +1260,14 @@ where
         }
     }
     if !changed {
-        Ok((false, Some(remainder)))
+        return Ok((false, Some(remainder)))
     } else if let Some((right, new_key, next_remainder)) = next.pop() {
         if let Some((left, _, _)) = next.pop() { // prepare new fork
             let mut label = SliceData::from(key.clone().into_cell()?);
             label.move_by(key_length)?;
             let (builder, remainder) = T::make_fork(&label, this_bit_len, left, right, false)?;
             *cell_opt = Some(builder.into_cell()?);
-            Ok((true, Some(remainder)))
+            return Ok((true, Some(remainder)))
         } else { // replace fork with edge
             *key = new_key;
             let mut label = SliceData::from(key.clone().into_cell()?);
@@ -1274,11 +1277,11 @@ where
                 builder.checked_append_references_and_data(remainder)?;
             }
             *cell_opt = Some(builder.into_cell()?);
-            Ok((true, next_remainder))
+            return Ok((true, next_remainder))
         }
     } else {
         *cell_opt = None;
-        Ok((true, None))
+        return Ok((true, None))
     }
 }
 

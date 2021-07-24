@@ -14,7 +14,7 @@
 use crate::cell::{BuilderData, SliceData};
 use num::FromPrimitive;
 use sha2::Digest;
-use std::{cmp, convert::TryInto, fmt, fmt::{LowerHex, UpperHex}, str::{self, FromStr}};
+use std::{fmt, fmt::{LowerHex, UpperHex}, cmp, str, convert::TryInto};
 
 
 pub type Result<T> = std::result::Result<T, failure::Error>;
@@ -57,18 +57,18 @@ pub struct UInt256([u8; 32]);
 impl PartialEq<SliceData> for UInt256 {
     fn eq(&self, other: &SliceData) -> bool {
         if other.remaining_bits() == 256 {
-            return self.0 == other.get_bytestring(0).as_slice()
+            return &self.0 == other.get_bytestring(0).as_slice()
         }
-        false
+        return false
     }
 }
 
 impl PartialEq<SliceData> for &UInt256 {
     fn eq(&self, other: &SliceData) -> bool {
         if other.remaining_bits() == 256 {
-            return self.0 == other.get_bytestring(0).as_slice()
+            return &self.0 == other.get_bytestring(0).as_slice()
         }
-        false
+        return false
     }
 }
 
@@ -77,7 +77,7 @@ impl PartialEq<Vec<u8>> for UInt256 {
         if other.len() == 32 {
             return &self.0 == other.as_slice()
         }
-        false
+        return false
     }
 }
 
@@ -121,8 +121,14 @@ impl UInt256 {
         hex::encode(self.0)
     }
 
-    // to be deleted
-    pub fn from_str(value: &str) -> Result<Self> { FromStr::from_str(value) }
+    pub fn from_str(value: &str) -> Result<Self> {
+        let bytes = match value.len() {
+            64 => hex::decode(value)?,
+            44 => base64::decode(value)?,
+            _ => fail!("invalid account ID string length (64 expected)")
+        };
+        Ok(Self(bytes.try_into().unwrap()))
+    }
 
     pub fn calc_file_hash(bytes: &[u8]) -> Self {
         let hash: [u8; 32] = sha2::Sha256::digest(bytes).into();
@@ -189,37 +195,29 @@ impl Into<[u8; 32]> for UInt256 {
     }
 }
 
-impl From<&[u8; 32]> for UInt256 {
-    fn from(data: &[u8; 32]) -> Self {
-        UInt256(*data)
+impl<'a> Into<&'a [u8; 32]> for &'a UInt256 {
+    fn into(self) -> &'a [u8; 32] {
+        &self.0
     }
 }
 
+impl<'a> From<&'a [u8; 32]> for UInt256 {
+    fn from(data: &[u8; 32]) -> Self {
+        UInt256(data.clone())
+    }
+}
+
+// to be deleted
 impl From<&[u8]> for UInt256 {
     fn from(value: &[u8]) -> Self { Self::from_le_bytes(value) }
 }
 
+// to be deleted
 impl From<Vec<u8>> for UInt256 {
     fn from(value: Vec<u8>) -> Self {
         match value.try_into() {
             Ok(hash) => Self(hash),
             Err(value) => UInt256::from_le_bytes(value.as_slice())
-        }
-    }
-}
-
-impl FromStr for UInt256 {
-    type Err = failure::Error;
-    fn from_str(value: &str) -> Result<Self> {
-        let bytes = match value.len() {
-            64 => hex::decode(value)?,
-            66 => hex::decode(&value[2..])?,
-            44 => base64::decode(value)?,
-            len => fail!("invalid account ID string length (64 expected), but got {} for string {}", len, value)
-        };
-        match bytes.try_into() {
-            Ok(bytes) => Ok(Self(bytes)),
-            Err(bytes) => fail!("array length is {} for {}", bytes.len(), value)
         }
     }
 }
@@ -257,15 +255,9 @@ impl UpperHex for UInt256 {
     }
 }
 
-impl AsRef<[u8; 32]> for UInt256 {
-    fn as_ref(&self) -> &[u8; 32] {
-        &self.0
-    }
-}
-
-impl AsRef<[u8]> for UInt256 {
+impl std::convert::AsRef<[u8]> for &UInt256 {
     fn as_ref(&self) -> &[u8] {
-        &self.0
+        self.as_slice()
     }
 }
 
@@ -342,7 +334,7 @@ impl fmt::Display for ExceptionCode {
 }
 */
 
-#[rustfmt::skip]
+#[cfg_attr(rustfmt, rustfmt_skip)]
 impl ExceptionCode {
 /*
     pub fn message(&self) -> &'static str {
