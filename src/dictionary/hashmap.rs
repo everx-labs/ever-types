@@ -31,7 +31,7 @@ pub struct HashmapE {
     data: Option<Cell>,
 }
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
+#[rustfmt::skip]
 impl fmt::Display for HashmapE {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.data() {

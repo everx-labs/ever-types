@@ -51,7 +51,7 @@ impl Ord for SliceData {
                 }
                 cmp::Ordering::Equal
             }
-            ordering @ _ => ordering
+            ordering => ordering
         }
     }
 }
@@ -89,7 +89,7 @@ impl PartialEq for SliceData {
                 return false;
             } 
         }
-        return true;
+        true
     }
 }
 
@@ -220,8 +220,8 @@ impl SliceData {
 
         let mut vec = vec![];
         if (start <= end) && (end <= refs_count) {
-            (0..start).for_each(|i| vec.push(self.reference(i).unwrap().clone()));
-            (end..refs_count).for_each(|i| vec.push(self.reference(i).unwrap().clone()));
+            (0..start).for_each(|i| vec.push(self.reference(i).unwrap()));
+            (end..refs_count).for_each(|i| vec.push(self.reference(i).unwrap()));
             self.references_window.end = self.references_window.start + end;
             self.references_window.start += start;
         }
@@ -436,7 +436,7 @@ impl SliceData {
             value |= r << (8 * (7 - bytes) + (8 - remainder));
         }
         self.move_by(bits)?;
-        Ok(value >> 64 - bits)
+        Ok(value >> (64 - bits))
     }
 
     pub fn get_next_size(&mut self, max_value: usize) -> Result<u64> {
@@ -618,11 +618,11 @@ impl SliceData {
             rem_b.shrink_data(offset + diff..);
         }
 
-        return (
+        (
             if prefix.remaining_bits() > 0 { Some(prefix) } else { None },
             if rem_a.remaining_bits() > 0 { Some(rem_a) } else { None },
             if rem_b.remaining_bits() > 0 { Some(rem_b) } else { None },
-        );
+        )
     }
 
     pub fn overwrite_prefix(&mut self, prefix: &SliceData) -> Result<()> {
@@ -714,10 +714,10 @@ impl fmt::Debug for SliceData {
     }
 }
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
+#[rustfmt::skip]
 impl fmt::Display for SliceData {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "data: {}..{}, references: {}..{}, data slice:{}, cell:{}\n", 
+        writeln!(f, "data: {}..{}, references: {}..{}, data slice:{}, cell:{}", 
                 self.data_window.start,
                 self.data_window.end,
                 self.references_window.start,
