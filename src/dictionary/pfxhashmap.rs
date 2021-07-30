@@ -25,7 +25,7 @@ pub struct PfxHashmapE {
     data: Option<Cell>,
 }
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
+#[rustfmt::skip]
 impl fmt::Display for PfxHashmapE {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.data() {
@@ -255,10 +255,7 @@ impl HashmapType for PfxHashmapE {
         Ok(slice.get_next_bit()? && slice.remaining_references() > 1)
     }
     fn is_leaf(slice: &mut SliceData) -> bool {
-        !slice.is_empty() && match slice.get_next_bit() {
-            Ok(false) => true,
-            _ => false
-        } 
+        !slice.is_empty() && matches!(slice.get_next_bit(), Ok(false))
     }
     fn data(&self) -> Option<&Cell> {
         self.data.as_ref()
