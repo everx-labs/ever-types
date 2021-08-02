@@ -14,7 +14,7 @@
 use crate::cell::{BuilderData, SliceData};
 use num::FromPrimitive;
 use sha2::Digest;
-use std::{cmp, convert::TryInto, fmt, fmt::{LowerHex, UpperHex}, str::{self, FromStr}};
+use std::{fmt, fmt::{LowerHex, UpperHex}, cmp, str, convert::TryInto, str::FromStr};
 
 
 pub type Result<T> = std::result::Result<T, failure::Error>;
@@ -112,16 +112,27 @@ impl UInt256 {
         true
     }
 
+    pub const fn as_array(&self) -> &[u8; 32] {
+        &self.0
+    }
+
     pub const fn as_slice(&self) -> &[u8; 32] {
         &self.0
     }
 
     // Returns solid string like this: a80b23bfe4d301497f3ce11e753f23e8dec32368945ee279d044dbc1f91ace2a
-    pub fn to_hex_string(&self) -> String {
+    pub fn as_hex_string(&self) -> String {
         hex::encode(self.0)
     }
 
-    // to be deleted
+    // TODO: usage should be changed to as_hex_string
+    #[allow(clippy::wrong_self_convention)]
+    pub fn to_hex_string(&self) -> String { self.as_hex_string() }
+
+    // TODO: usage should be changed to str::FromStr
+    // #[deprecated]
+    #[allow(clippy::should_implement_trait)]
+    #[cfg(not(test))]
     pub fn from_str(value: &str) -> Result<Self> { FromStr::from_str(value) }
 
     pub fn calc_file_hash(bytes: &[u8]) -> Self {
@@ -169,6 +180,14 @@ impl UInt256 {
         Self((0..32).map(|_| { rand::random::<u8>() }).collect::<Vec<u8>>().try_into().unwrap())
     }
 
+    pub fn inner(self) -> [u8; 32] {
+        self.0
+    }
+
+    pub fn into_vec(self) -> Vec<u8> {
+        self.0.to_vec()
+    }
+
     pub const ZERO: UInt256 = UInt256([0; 32]);
     pub const MIN: UInt256 = UInt256([0; 32]);
     pub const MAX: UInt256 = UInt256([0xFF; 32]);
@@ -183,9 +202,19 @@ impl From<[u8; 32]> for UInt256 {
     }
 }
 
+// TBD: use inner
+#[allow(clippy::from_over_into)]
 impl Into<[u8; 32]> for UInt256 {
     fn into(self) -> [u8; 32] {
         self.0
+    }
+}
+
+// TBD: use as_array
+#[allow(clippy::from_over_into)]
+impl<'a> Into<&'a [u8; 32]> for &'a UInt256 {
+    fn into(self) -> &'a [u8; 32] {
+        &self.0
     }
 }
 
@@ -242,9 +271,11 @@ impl fmt::Display for UInt256 {
 impl LowerHex for UInt256 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if f.alternate() {
-            write!(f, "0x")?;
+            write!(f, "0x{}", hex::encode(&self.0))
+        } else {
+            write!(f, "{}", hex::encode(&self.0))
+            // write!(f, "{}...{}", hex::encode(&self.0[..2]), hex::encode(&self.0[30..32]))
         }
-        write!(f, "{}", hex::encode(&self.0))
     }
 }
 
@@ -292,10 +323,10 @@ impl From<&UInt256> for AccountId {
     }
 }
 
-impl str::FromStr for AccountId {
+impl FromStr for AccountId {
     type Err = failure::Error;
-    fn from_str(value: &str) -> Result<Self> {
-        let uint = UInt256::from_str(value)?;
+    fn from_str(s: &str) -> Result<Self> {
+        let uint: UInt256 = FromStr::from_str(s)?;
         Ok(AccountId::from(uint.0))
     }
 }

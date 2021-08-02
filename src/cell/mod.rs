@@ -151,7 +151,7 @@ impl From<CellType> for u8 {
     }
 }
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
+#[rustfmt::skip]
 impl fmt::Display for CellType {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let msg = match *self {
@@ -334,13 +334,13 @@ impl Cell {
     }
 
     fn print_indent(f: &mut fmt::Formatter, indent: &str, last_child: bool, first_line: bool) -> fmt::Result {
-        write!(f, "{}{}", indent, if first_line {
-                if last_child {" └─"} else {" ├─"} 
-            } else { 
-                if last_child {"   "} else {" │ "}
-            })?;
-
-        Ok(())
+        let build = match (first_line, last_child) {
+            (true, true) => " └─",
+            (true, false) => " ├─",
+            (false, true) => "   ",
+            (false, false) => " │ "
+        };
+        write!(f, "{}{}", indent, build)
     }
 
     pub fn format_without_refs(&self, f: &mut fmt::Formatter, indent: &str, last_child: bool, 
@@ -356,7 +356,7 @@ impl Cell {
         write!(f, "   refs: {}", self.references_count())?;
 
         if self.data().len() > 100 {
-            write!(f, "\n")?;
+            writeln!(f)?;
             if !root { Self::print_indent(f, indent, last_child, false)?; }
         } else {
             write!(f, "   ")?;
@@ -365,13 +365,13 @@ impl Cell {
         write!(f, "data: {}", self.to_hex_string(true))?;
 
         if full {
-            write!(f, "\n")?;
+            writeln!(f)?;
             if !root { Self::print_indent(f, indent, last_child, false)?; }
             write!(f, "hashes:")?;
             for h in self.hashes().iter() {
                 write!(f, " {:x}", h)?;
             }
-            write!(f, "\n")?;
+            writeln!(f)?;
             if !root { Self::print_indent(f, indent, last_child, false)?; }
             write!(f, "depths:")?;
             for d in self.depths().iter() {
@@ -398,7 +398,7 @@ impl Cell {
             }
             for i in 0..self.references_count() {
                 let child = self.reference(i).unwrap();
-                write!(f, "\n")?;
+                writeln!(f)?;
                 indent = child.format_with_refs_tree(
                     f, indent, i == self.references_count() - 1, full, false, remaining_depth - 1)?;
             }
@@ -446,7 +446,7 @@ impl PartialEq for Cell {
 
 impl PartialEq<UInt256> for Cell {
     fn eq(&self, other_hash: &UInt256) -> bool {
-        self.repr_hash() == other_hash
+        &self.repr_hash() == other_hash
     }
 }
 
@@ -657,13 +657,13 @@ impl CellData {
         writer.write_all(&[if self.store_hashes { 1 } else { 0 }])?;
         if let Some(ref hashes) = self.hashes {
             let mut len = hashes.len();
-            if let Some(pos) = hashes.iter().position(|hash| hash == UInt256::MIN) {
+            if let Some(pos) = hashes.iter().position(|hash| hash == &UInt256::MIN) {
                 len = std::cmp::min(len, pos);
             }
             writer.write_all(&[1])?;
             writer.write_all(&[len as u8])?;
-            for i in 0..len {
-                writer.write_all(hashes[i].as_slice())?;
+            for hash in hashes.iter().take(len) {
+                writer.write_all(hash.as_slice())?;
             }
         } else {
             writer.write_all(&[0])?;
@@ -675,8 +675,8 @@ impl CellData {
             }
             writer.write_all(&[1])?;
             writer.write_all(&[len as u8])?;
-            for i in 0..len {
-                writer.write_all(&depths[i].to_le_bytes())?;
+            for depth in depths.iter().take(len) {
+                writer.write_all(&depth.to_le_bytes())?;
             }
         } else {
             writer.write_all(&[0])?;
