@@ -245,8 +245,8 @@ impl BagOfCells {
                     
                     for i in 0..cell.references_count() {
                         let child = cell.reference(i).unwrap();
-                        let child_index = hashes_to_indexes[&child.repr_hash()] as usize;
-                        assert!(child_index > cell_index);
+                        let child_index = hashes_to_indexes[&child.repr_hash()] as u64;
+                        assert!(child_index > cell_index as u64);
                         dest.write_all(&(child_index).to_be_bytes()[(8-ref_size)..8])?;
                     }
                 }
