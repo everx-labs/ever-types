@@ -14,7 +14,7 @@
 use std::convert::From;
 use std::fmt;
 
-use crate::{error, fail};
+use crate::{MAX_DATA_BITS, error, fail};
 use crate::cell::{append_tag, Cell, CellType, DataCell, find_tag, LevelMask, SliceData};
 use crate::types::{ExceptionCode, Result};
 
@@ -353,6 +353,20 @@ impl BuilderData {
 
     pub fn prepend_reference_cell(&mut self, child: Cell) {
         self.references.insert(0, child);
+    }
+
+    pub fn replace_data(&mut self, data: Vec<u8>, length_in_bits: usize) {
+        self.length_in_bits = std::cmp::min(std::cmp::min(length_in_bits, MAX_DATA_BITS), data.len() * 8);
+        self.data = data;
+    }
+
+    pub fn replace_reference_cell(&mut self, index: usize, child: Cell) {
+        match self.references.get_mut(index) {
+            None => {
+                log::error!("replacing not existed cell by index {} with cell hash {:x}", index, child.repr_hash());
+            }
+            Some(old) => *old = child
+        }
     }
 
     pub fn set_type(&mut self, cell_type: CellType) {
