@@ -22,6 +22,7 @@ pub use self::dictionary::*;
 
 pub mod cells_serialization;
 pub use cells_serialization::*;
+use smallvec::SmallVec;
 
 pub trait Mask {
     fn bit(&self, bits: Self) -> bool;
@@ -64,10 +65,10 @@ impl GasConsumer for u64 {
     }
 }
 
-pub fn parse_slice_base(slice: &str, mut bits: usize, base: u32) -> Option<Vec<u8>> {
+pub fn parse_slice_base(slice: &str, mut bits: usize, base: u32) -> Option<SmallVec<[u8; 128]>> {
     debug_assert!(bits < 8, "it is offset to get slice parsed");
     let mut acc = 0u8;
-    let mut data = vec![];
+    let mut data = SmallVec::new();
     let mut completion_tag = false;
     for ch in slice.chars() {
         if completion_tag {

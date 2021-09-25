@@ -18,21 +18,23 @@
 edition = "2018"
 build = "build.rs"
 name = "ton_types"
-version = "1.10.5"
+version = "1.10.9"
 
 [dependencies]
 lockfree = { git = "https://github.com/tonlabs/lockfree.git" }
 
 # External
-base64 = "0.11.0"
-crc = "^1.8.1"
+base64 = "0.13"
+crc = "1.8.1"
 failure ="0.1.6"
-hex = "^0.4.0"
-log = "0.4.8"
-num = "^0.2"
-num-traits = "^0.2"
-num-derive = "^0.3"
-rand = "^0.8.3"
-sha2 = "^0.8"
+hex = "0.4"
+lazy_static = "1.4.0"
+log = "0.4"
+num = "0.4"
+num-derive = "0.3"
+num-traits = "0.2"
+rand = "0.8.3"
+sha2 = "0.9"
+smallvec = { version = "1.6.1", features = ["const_generics", "union", "write"] }
 
 

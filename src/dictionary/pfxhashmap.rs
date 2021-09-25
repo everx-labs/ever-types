@@ -230,7 +230,7 @@ impl HashmapType for PfxHashmapE {
     fn make_cell_with_label_and_builder(key: SliceData, max: usize, is_leaf: bool, data: &BuilderData) -> Result<BuilderData> {
         let mut builder = hm_label(&key, max)?;
         builder.append_bit_bool(!is_leaf)?;
-        builder.append_builder(&data)?;
+        builder.append_builder(data)?;
         Ok(builder)
     }
     fn make_fork(key: &SliceData, bit_len: usize, mut left: Cell, mut right: Cell, swap: bool) -> Result<(BuilderData, SliceData)> {
