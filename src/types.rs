@@ -14,8 +14,8 @@
 use crate::cell::{BuilderData, SliceData};
 use num::FromPrimitive;
 use sha2::Digest;
-use std::{fmt, fmt::{LowerHex, UpperHex}, cmp, str, convert::TryInto, str::FromStr};
-
+use std::{cmp, convert::TryInto, fmt, fmt::{LowerHex, UpperHex}, str::{self, FromStr}};
+use smallvec::SmallVec;
 
 pub type Result<T> = std::result::Result<T, failure::Error>;
 pub type Failure = Option<failure::Error>;
@@ -51,6 +51,7 @@ macro_rules! fail {
     };
 }
 
+// TBD: Copy
 #[derive(Clone, Copy, Default, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct UInt256([u8; 32]);
 
@@ -69,27 +70,6 @@ impl PartialEq<SliceData> for &UInt256 {
             return self.0 == other.get_bytestring(0).as_slice()
         }
         false
-    }
-}
-
-impl PartialEq<Vec<u8>> for UInt256 {
-    fn eq(&self, other: &Vec<u8>) -> bool {
-        if other.len() == 32 {
-            return &self.0 == other.as_slice()
-        }
-        false
-    }
-}
-
-impl PartialEq<UInt256> for &UInt256 {
-    fn eq(&self, other: &UInt256) -> bool {
-        self.0 == other.0
-    }
-}
-
-impl PartialEq<&UInt256> for UInt256 {
-    fn eq(&self, other: &&UInt256) -> bool {
-        self.0 == other.0
     }
 }
 
@@ -135,9 +115,10 @@ impl UInt256 {
     #[cfg(not(test))]
     pub fn from_str(value: &str) -> Result<Self> { FromStr::from_str(value) }
 
-    pub fn calc_file_hash(bytes: &[u8]) -> Self {
-        let hash: [u8; 32] = sha2::Sha256::digest(bytes).into();
-        Self(hash)
+    pub fn calc_file_hash(bytes: &[u8]) -> Self { Self::calc_sha256(bytes) }
+
+    pub fn calc_sha256(bytes: &[u8]) -> Self {
+        Self(sha2::Sha256::digest(bytes).into())
     }
 
     pub fn first_u64(&self) -> u64 {
@@ -203,18 +184,9 @@ impl From<[u8; 32]> for UInt256 {
 }
 
 // TBD: use inner
-#[allow(clippy::from_over_into)]
-impl Into<[u8; 32]> for UInt256 {
-    fn into(self) -> [u8; 32] {
-        self.0
-    }
-}
-
-// TBD: use as_array
-#[allow(clippy::from_over_into)]
-impl<'a> Into<&'a [u8; 32]> for &'a UInt256 {
-    fn into(self) -> &'a [u8; 32] {
-        &self.0
+impl From<UInt256> for [u8; 32] {
+    fn from(data: UInt256) -> Self {
+        data.0
     }
 }
 
@@ -304,22 +276,19 @@ pub type AccountId = SliceData;
 
 impl From<[u8; 32]> for AccountId {
     fn from(data: [u8; 32]) -> AccountId {
-        let data = data.to_vec();
-        BuilderData::with_raw(data, 256).unwrap().into_cell().unwrap().into()
+        BuilderData::with_raw(SmallVec::from_slice(&data), 256).unwrap().into_cell().unwrap().into()
     }
 }
 
 impl From<UInt256> for AccountId {
     fn from(data: UInt256) -> AccountId {
-        let data = data.0.to_vec();
-        BuilderData::with_raw(data, 256).unwrap().into_cell().unwrap().into()
+        BuilderData::with_raw(SmallVec::from_slice(&data.0), 256).unwrap().into_cell().unwrap().into()
     }
 }
 
 impl From<&UInt256> for AccountId {
     fn from(data: &UInt256) -> AccountId {
-        let data = data.0.to_vec();
-        BuilderData::with_raw(data, 256).unwrap().into_cell().unwrap().into()
+        BuilderData::with_raw(SmallVec::from_slice(&data.0), 256).unwrap().into_cell().unwrap().into()
     }
 }
 
@@ -481,3 +450,4 @@ impl<T: std::io::Read> ByteOrderRead for T {
 }
 
 pub type Bitmask = u8;
+

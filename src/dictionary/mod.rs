@@ -21,6 +21,7 @@ use crate::types::{ExceptionCode, Result};
 
 pub use self::hashmap::HashmapE;
 pub use self::pfxhashmap::PfxHashmapE;
+use smallvec::SmallVec;
 
 mod hashmap;
 mod pfxhashmap;
@@ -29,14 +30,18 @@ pub type Leaf = Result<Option<SliceData>>;
 
 pub const ADD: u8 = 0x01;
 pub const REPLACE: u8 = 0x02;
+#[allow(clippy::unusual_byte_groupings)]
 const EMPTY_LABEL_MARKER: u8 = 0b00_000000;
+#[allow(clippy::unusual_byte_groupings)]
 const SHORT_LABEL_PREFIX: u8 = 0b0_0000000; // hml_short constructor, binary 0
+#[allow(clippy::unusual_byte_groupings)]
 const LONG_LABEL_PREFIX: u8 = 0b10_000000; // hml_long, binary 10
+#[allow(clippy::unusual_byte_groupings)]
 const SAME_LABEL_PREFIX: u8 = 0b11_000000; // hml_same, binary 11
 
 // hml_long$10 n:(#<= m) s:n*bit = HmLabel ~n m;
 fn hml_long(key: &SliceData, len: usize) -> Result<BuilderData> {
-    let mut label = BuilderData::with_raw(vec![LONG_LABEL_PREFIX], 2)?;
+    let mut label = BuilderData::with_raw(SmallVec::from_slice(&[LONG_LABEL_PREFIX]), 2)?;
     label.append_bits(key.remaining_bits(), len)?;
     label.append_bytestring(key)?;
     Ok(label)
@@ -44,7 +49,7 @@ fn hml_long(key: &SliceData, len: usize) -> Result<BuilderData> {
 
 // hml_short$0 {n:#} len:(Unary ~n) s:n*bit = HmLabel ~n m;
 fn hml_short(key: &SliceData) -> Option<BuilderData> {
-    let mut label = BuilderData::with_raw(vec![SHORT_LABEL_PREFIX], 1).ok()?;
+    let mut label = BuilderData::with_raw(SmallVec::from_slice(&[SHORT_LABEL_PREFIX]), 1).ok()?;
     let length = key.remaining_bits();
     for _ in 0..length / 32 {
         label.append_bits(std::u32::MAX as usize, 32).ok()?;
@@ -64,23 +69,22 @@ fn hml_same(key: &SliceData, len: usize) -> Option<BuilderData> {
     let mut one_bit_found = false;
     let bits = key.remaining_bits();
     for offset in 0..bits {
-        match key.get_bits(offset, 1).ok()? {
-            0 if one_bit_found => return None,
-            0 => zero_bit_found = true,
-            1 if zero_bit_found => return None,
-            1 => one_bit_found = true,
-            _ => return None
+        match key.get_bit_opt(offset)? {
+            false if one_bit_found => return None,
+            false => zero_bit_found = true,
+            true if zero_bit_found => return None,
+            true => one_bit_found = true,
         }
     }
 
-    let mut label = BuilderData::with_raw(vec![SAME_LABEL_PREFIX], 2).ok()?;
+    let mut label = BuilderData::with_raw(SmallVec::from_slice(&[SAME_LABEL_PREFIX]), 2).ok()?;
     label.append_bit_bool(!zero_bit_found).ok()?;
     label.append_bits(bits, len).ok()?;
     Some(label)
 }
 
 pub fn hm_empty() -> Result<BuilderData> {
-    BuilderData::with_raw(vec![EMPTY_LABEL_MARKER], 2)
+    BuilderData::with_raw(SmallVec::from_slice(&[EMPTY_LABEL_MARKER]), 2)
 }
 
 pub fn hm_label(key: &SliceData, max: usize) -> Result<BuilderData> {
@@ -267,8 +271,7 @@ impl SliceData {
 // methods working with root
 impl SliceData {
     pub fn is_empty_root(&self) -> bool {
-        self.is_empty() || 
-        matches!(self.get_bits(0, 1), Ok(0))
+        self.is_empty() || matches!(self.get_bit_opt(0), Some(false))
     }
     pub fn get_dictionary(&mut self) -> Result<SliceData> {
         self.get_dictionary_opt().ok_or_else(|| error!(ExceptionCode::CellUnderflow))
@@ -289,6 +292,7 @@ impl SliceData {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn find_leaf<T: HashmapType + ?Sized>(
     mut data: Cell,
     path: &mut BuilderData,
@@ -304,7 +308,7 @@ fn find_leaf<T: HashmapType + ?Sized>(
     match SliceData::common_prefix(&key, &label) {
         (_, None, Some(_)) => fail!(ExceptionCode::DictionaryError),
         (prefix_opt, Some(remainder), Some(_)) => { // hm_edge is sliced
-            let key_bit = remainder.get_bits(0, 1)? as usize;
+            let key_bit = remainder.get_bit(0)? as usize;
             let next = match signed_int && path.is_empty() && prefix_opt.is_none() {
                 false => next_index,
                 true => 1 - next_index,
@@ -422,7 +426,7 @@ pub trait HashmapType {
     }
     fn make_edge(key: &SliceData, bit_len: usize, is_left: bool, mut next: SliceData) -> Result<BuilderData> {
         let mut next_bit_len = bit_len.checked_sub(key.remaining_bits() + 1).ok_or(ExceptionCode::CellUnderflow)?;
-        let mut label = BuilderData::from_slice(&key);
+        let mut label = BuilderData::from_slice(key);
         label.append_bit_bool(!is_left)?;
         label = next.get_label_raw(&mut next_bit_len, label)?;
         let is_leaf = Self::is_leaf(&mut next);
@@ -605,18 +609,18 @@ pub trait HashmapType {
                 true  => return Ok((None, Some(data.clone()))),
             }
             // wrong hashmap tree
-            _ => fail!("split fail: root label: x{} and key: x{}", label.to_hex_string(), key.to_hex_string()),
+            _ => fail!("split fail: root label: x{:x} and key: x{:x}", label, key),
         };
         cursor = SliceData::from(left);
         let label = cursor.get_label(bit_len)?;
-        let mut builder = BuilderData::from_slice(&key);
+        let mut builder = BuilderData::from_slice(key);
         builder.append_bit_zero()?;
         builder.append_bytestring(&label)?;
         let left = Self::make_cell_with_label_and_data(builder.into_cell()?.into(), self.bit_len(), false, &cursor)?;
 
         cursor = SliceData::from(right);
         let label = cursor.get_label(bit_len)?;
-        let mut builder = BuilderData::from_slice(&key);
+        let mut builder = BuilderData::from_slice(key);
         builder.append_bit_one()?;
         builder.append_bytestring(&label)?;
         let right = Self::make_cell_with_label_and_data(builder.into_cell()?.into(), self.bit_len(), false, &cursor)?;
@@ -645,7 +649,7 @@ pub trait HashmapType {
         match SliceData::common_prefix(&label1, &label2) {
             (prefix, Some(mut left), Some(mut right)) => {
                 let prefix = prefix.unwrap_or_default();
-                if let (_, _, Some(_)) = SliceData::common_prefix(&prefix, &key) {
+                if let (_, _, Some(_)) = SliceData::common_prefix(&prefix, key) {
                     fail!("common prefix of merging hashmaps is too short")
                 }
                 let left_bit = left.get_next_bit()?;
@@ -1282,9 +1286,15 @@ where
     }
 }
 
-pub trait HashmapSubtree: HashmapType {
+pub trait HashmapSubtree: HashmapType + Sized {
     /// transform to subtree with the common prefix
+    // #[deprecated]
+    #[allow(clippy::wrong_self_convention)]
     fn into_subtree_with_prefix(&mut self, prefix: &SliceData, gas_consumer: &mut dyn GasConsumer) -> Result<()> {
+        self.subtree_with_prefix(prefix, gas_consumer)
+    }
+    /// transform to subtree with the common prefix
+    fn subtree_with_prefix(&mut self, prefix: &SliceData, gas_consumer: &mut dyn GasConsumer) -> Result<()> {
         let prefix_len = prefix.remaining_bits();
         if prefix_len == 0 || self.bit_len() < prefix_len {
             return Ok(())
@@ -1306,9 +1316,21 @@ pub trait HashmapSubtree: HashmapType {
         }
         Ok(())
     }
-    
+
+    /// transform to subtree with the common prefix
+    fn into_subtree_w_prefix(mut self, prefix: &SliceData, gas_consumer: &mut dyn GasConsumer) -> Result<Self> {
+        self.subtree_with_prefix(prefix, gas_consumer)?;
+        Ok(self)
+    }
+
     /// transform to subtree without the common prefix (dec bit_len)
-    fn into_subtree_without_prefix(&mut self, prefix: &SliceData, gas_consumer: &mut dyn GasConsumer) -> Result<()> {
+    // #[deprecated]
+    #[allow(clippy::wrong_self_convention)]
+    fn into_subtree_without_prefix(&mut self, prefix: &SliceData, gas_consumer: &mut dyn GasConsumer)-> Result<()> {
+        self.subtree_without_prefix(prefix, gas_consumer)
+    }
+    /// transform to subtree without the common prefix (dec bit_len)
+    fn subtree_without_prefix(&mut self, prefix: &SliceData, gas_consumer: &mut dyn GasConsumer)-> Result<()> {
         let prefix_len = prefix.remaining_bits();
         if prefix_len == 0 || self.bit_len() < prefix_len {
             return Ok(())
@@ -1331,25 +1353,31 @@ pub trait HashmapSubtree: HashmapType {
         Ok(())
     }
 
+    /// transform to subtree without the common prefix (dec bit_len)
+    fn into_subtree_wo_prefix(mut self, prefix: &SliceData, gas_consumer: &mut dyn GasConsumer)-> Result<Self> {
+        self.subtree_without_prefix(prefix, gas_consumer)?;
+        Ok(self)
+    }
+
     /// transform to subtree with the maximal common prefix
-    fn into_subtree_with_prefix_not_exact(&mut self, prefix: &SliceData, gas_consumer: &mut dyn GasConsumer) -> Result<()> {
+    fn into_subtree_with_prefix_not_exact(mut self, prefix: &SliceData, gas_consumer: &mut dyn GasConsumer) -> Result<Self> {
         let bit_len = self.bit_len();
         if bit_len <= prefix.remaining_bits() {
-            return Ok(())
+            return Ok(self)
         }
         if let Some(root) = self.data() {
             let mut cursor = LabelReader::new(gas_consumer.load_cell(root.clone())?);
             let (key, rem_prefix) = down_by_tree::<Self>(prefix, &mut cursor, self.bit_len(), gas_consumer)?;
             if rem_prefix.as_ref() == Some(prefix) {
                 *self.data_mut() = None;
-                return Ok(())
+                return Ok(self)
             }
             let mut remainder = cursor.remainder()?;
             let is_leaf = Self::is_leaf(&mut remainder);
             let root = Self::make_cell_with_label_and_data(key.into_cell()?.into(), self.bit_len(), is_leaf, &remainder)?;
             *self.data_mut() = Some(gas_consumer.finalize_cell(root)?);
         }
-        Ok(())
+        Ok(self)
     }
 }
 
@@ -1371,7 +1399,6 @@ where T: HashmapType + ?Sized {
         }
     }
 }
-
 
 #[derive(Debug, Eq, PartialEq)]
 pub struct HashmapIterator<T: HashmapType + ?Sized> {
@@ -1411,3 +1438,4 @@ impl<T: HashmapType + ?Sized> Iterator for HashmapIterator<T> {
         self.next_item().transpose()
     }
 }
+
