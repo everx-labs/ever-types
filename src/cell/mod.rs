@@ -193,11 +193,17 @@ pub trait CellImpl: Sync + Send {
     fn tree_cell_count(&self) -> u64 { 0 }
 }
 
-#[derive(Clone)]
+//#[derive(Clone)]
 pub struct Cell(Arc<dyn CellImpl>);
 
 lazy_static::lazy_static!{
     static ref CELL_COUNT: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
+}
+
+impl Clone for Cell {
+    fn clone(&self) -> Self {
+        Cell::with_cell_impl_arc(self.0.clone())
+    }
 }
 
 impl Drop for Cell {
@@ -448,7 +454,7 @@ impl Cell {
 
 impl Default for Cell {
     fn default() -> Self {
-        Cell(Arc::new(DataCell::new()))
+        Cell::with_cell_impl_arc(Arc::new(DataCell::new()))
     }
 }
 
