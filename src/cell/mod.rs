@@ -239,7 +239,11 @@ impl LevelMask {
     /// Functions over [`Copy`] types should (almost) never take `&self`, especially when they
     /// actually have a size equal to or smaller than pointers (which is the case here). Taking
     /// `&self` instead of `self` just introduces a useless indirection that needs to be resolved in
-    /// the function.
+    /// the function. Note that this is not a breaking change, unless the function is called using
+    /// [universal function call syntax].
+    ///
+    /// [universal function call syntax]:
+    /// http://web.mit.edu/rust-lang_v1.25/arch/amd64_ubuntu1404/share/doc/rust/html/book/first-edition/ufcs.html
     ///
     /// # Examples
     ///
@@ -278,7 +282,11 @@ impl LevelMask {
     /// Functions over [`Copy`] types should (almost) never take `&self`, especially when they
     /// actually have a size equal to or smaller than pointers (which is the case here). Taking
     /// `&self` instead of `self` just introduces a useless indirection that needs to be resolved in
-    /// the function.
+    /// the function. Note that this is not a breaking change, unless the function is called using
+    /// [universal function call syntax].
+    ///
+    /// [universal function call syntax]:
+    /// http://web.mit.edu/rust-lang_v1.25/arch/amd64_ubuntu1404/share/doc/rust/html/book/first-edition/ufcs.html
     ///
     /// # Examples
     ///
@@ -313,11 +321,15 @@ impl LevelMask {
     /// Functions over [`Copy`] types should (almost) never take `&self`, especially when they
     /// actually have a size equal to or smaller than pointers (which is the case here). Taking
     /// `&self` instead of `self` just introduces a useless indirection that needs to be resolved in
-    /// the function.
+    /// the function. Note that this is not a breaking change, unless the function is called using
+    /// [universal function call syntax].
+    ///
+    /// [universal function call syntax]:
+    /// http://web.mit.edu/rust-lang_v1.25/arch/amd64_ubuntu1404/share/doc/rust/html/book/first-edition/ufcs.html
     ///
     /// Not sure why this function starts with `calc`. Is it to indicate that it performs
-    /// computations? Because [`Self::level`] computes stuff too, but has no `calc_`. Would
-    /// probably be more idiomatic to just call this function `hash_index`.
+    /// computations? Because [`Self::level`] computes stuff too, but has no `calc_`. Would probably
+    /// be more idiomatic to just call this function `hash_index`.
     pub fn calc_hash_index(&self, mut index: usize) -> usize {
         // if cell contains requared hash() - it will be returned,
         // else = max avaliable, but less then index
@@ -343,11 +355,15 @@ impl LevelMask {
     /// Functions over [`Copy`] types should (almost) never take `&self`, especially when they
     /// actually have a size equal to or smaller than pointers (which is the case here). Taking
     /// `&self` instead of `self` just introduces a useless indirection that needs to be resolved in
-    /// the function.
+    /// the function. Note that this is not a breaking change, unless the function is called using
+    /// [universal function call syntax].
+    ///
+    /// [universal function call syntax]:
+    /// http://web.mit.edu/rust-lang_v1.25/arch/amd64_ubuntu1404/share/doc/rust/html/book/first-edition/ufcs.html
     ///
     /// Not sure why this function starts with `calc`. Is it to indicate that it performs
-    /// computations? Because [`Self::level`] computes stuff too, but has no `calc_`. Would
-    /// probably be more idiomatic to just call this function `virtual_hash_index`.
+    /// computations? Because [`Self::level`] computes stuff too, but has no `calc_`. Would probably
+    /// be more idiomatic to just call this function `virtual_hash_index`.
     pub fn calc_virtual_hash_index(&self, index: usize, virt_offset: u8) -> usize {
         LevelMask::with_mask(self.0 >> virt_offset).calc_hash_index(index)
     }
@@ -359,7 +375,11 @@ impl LevelMask {
     /// Functions over [`Copy`] types should (almost) never take `&self`, especially when they
     /// actually have a size equal to or smaller than pointers (which is the case here). Taking
     /// `&self` instead of `self` just introduces a useless indirection that needs to be resolved in
-    /// the function.
+    /// the function. Note that this is not a breaking change, unless the function is called using
+    /// [universal function call syntax].
+    ///
+    /// [universal function call syntax]:
+    /// http://web.mit.edu/rust-lang_v1.25/arch/amd64_ubuntu1404/share/doc/rust/html/book/first-edition/ufcs.html
     pub fn virtualize(&self, virt_offset: u8) -> Self {
         LevelMask::with_mask(self.0 >> virt_offset)
     }
