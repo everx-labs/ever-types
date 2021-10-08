@@ -240,7 +240,8 @@ impl LevelMask {
     /// actually have a size equal to or smaller than pointers (which is the case here). Taking
     /// `&self` instead of `self` just introduces a useless indirection that needs to be resolved in
     /// the function. Note that this is not a breaking change, unless the function is called using
-    /// [universal function call syntax].
+    /// [universal function call syntax]. Also note that the gain in performance would be very
+    /// minimal.
     ///
     /// [universal function call syntax]:
     /// http://web.mit.edu/rust-lang_v1.25/arch/amd64_ubuntu1404/share/doc/rust/html/book/first-edition/ufcs.html
@@ -283,7 +284,8 @@ impl LevelMask {
     /// actually have a size equal to or smaller than pointers (which is the case here). Taking
     /// `&self` instead of `self` just introduces a useless indirection that needs to be resolved in
     /// the function. Note that this is not a breaking change, unless the function is called using
-    /// [universal function call syntax].
+    /// [universal function call syntax]. Also note that the gain in performance would be very
+    /// minimal.
     ///
     /// [universal function call syntax]:
     /// http://web.mit.edu/rust-lang_v1.25/arch/amd64_ubuntu1404/share/doc/rust/html/book/first-edition/ufcs.html
@@ -322,7 +324,8 @@ impl LevelMask {
     /// actually have a size equal to or smaller than pointers (which is the case here). Taking
     /// `&self` instead of `self` just introduces a useless indirection that needs to be resolved in
     /// the function. Note that this is not a breaking change, unless the function is called using
-    /// [universal function call syntax].
+    /// [universal function call syntax]. Also note that the gain in performance would be very
+    /// minimal.
     ///
     /// [universal function call syntax]:
     /// http://web.mit.edu/rust-lang_v1.25/arch/amd64_ubuntu1404/share/doc/rust/html/book/first-edition/ufcs.html
@@ -331,19 +334,13 @@ impl LevelMask {
     /// computations? Because [`Self::level`] computes stuff too, but has no `calc_`. Would probably
     /// be more idiomatic to just call this function `hash_index`.
     pub fn calc_hash_index(&self, mut index: usize) -> usize {
-        // if cell contains requared hash() - it will be returned,
-        // else = max avaliable, but less then index
+        // if cell contains requared hash() - it will be returned, else = max avaliable, but less
+        // then index
         //
-        // rows - cell mask
-        //       0(0)  1(1)  2(3)  3(7)  columns - index(mask)
-        // 0     0     0     0     0     cells - index(AND result)
-        // 1     0     1(1)  1(1)  1(1)
-        // 2     0     0(0)  1(2)  1(2)
-        // 3     0     1(1)  2(3)  2(3)
-        // 4     0     0(0)  0(0)  1(4)
-        // 5     0     1(1)  0(0)  2(5)
-        // 6     0     0(0)  1(2)  2(6)
-        // 7     0     1(1)  2(3)  3(7)
+        // rows - cell mask 0(0)  1(1)  2(3)  3(7)  columns - index(mask) 0     0     0     0     0
+        //       cells - index(AND result) 1     0     1(1)  1(1)  1(1) 2     0     0(0)  1(2)  1(2)
+        //       3     0     1(1)  2(3)  2(3) 4     0     0(0)  0(0)  1(4) 5     0     1(1)  0(0)
+        //       2(5) 6     0     0(0)  1(2)  2(6) 7     0     1(1)  2(3)  3(7)
         index = min(index, 3);
         LevelMask::with_mask(self.0 & LevelMask::with_level(index as u8).0).level() as usize
     }
@@ -356,7 +353,8 @@ impl LevelMask {
     /// actually have a size equal to or smaller than pointers (which is the case here). Taking
     /// `&self` instead of `self` just introduces a useless indirection that needs to be resolved in
     /// the function. Note that this is not a breaking change, unless the function is called using
-    /// [universal function call syntax].
+    /// [universal function call syntax]. Also note that the gain in performance would be very
+    /// minimal.
     ///
     /// [universal function call syntax]:
     /// http://web.mit.edu/rust-lang_v1.25/arch/amd64_ubuntu1404/share/doc/rust/html/book/first-edition/ufcs.html
@@ -376,7 +374,8 @@ impl LevelMask {
     /// actually have a size equal to or smaller than pointers (which is the case here). Taking
     /// `&self` instead of `self` just introduces a useless indirection that needs to be resolved in
     /// the function. Note that this is not a breaking change, unless the function is called using
-    /// [universal function call syntax].
+    /// [universal function call syntax]. Also note that the gain in performance would be very
+    /// minimal.
     ///
     /// [universal function call syntax]:
     /// http://web.mit.edu/rust-lang_v1.25/arch/amd64_ubuntu1404/share/doc/rust/html/book/first-edition/ufcs.html
