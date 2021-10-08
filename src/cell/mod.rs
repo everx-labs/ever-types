@@ -11,36 +11,166 @@
 * limitations under the License.
 */
 
+use crate::cells_serialization::{BagOfCells, SHA256_SIZE};
+use crate::types::{ByteOrderRead, ExceptionCode, Result, UInt256};
 use crate::{error, fail};
-use crate::types::{ExceptionCode, Result, UInt256, ByteOrderRead};
-use crate::cells_serialization::{SHA256_SIZE, BagOfCells};
-use std::sync::{Arc, Weak, atomic::{AtomicU64, Ordering}};
+use num::{FromPrimitive, ToPrimitive};
+use sha2::{Digest, Sha256};
+use std::cmp::{max, min};
 use std::fmt;
 use std::ops::{BitOr, BitOrAssign, Deref};
-use sha2::{Sha256, Digest};
-use std::cmp::{max, min};
-use num::{FromPrimitive, ToPrimitive};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, Weak,
+};
 
 pub const MAX_REFERENCES_COUNT: usize = 4;
 pub const MAX_DATA_BITS: usize = 1023;
 pub const MAX_LEVEL: usize = 3;
 pub const MAX_DEPTH: u16 = u16::MAX - 1;
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy, Hash)]
-#[derive(num_derive::FromPrimitive, num_derive::ToPrimitive)]
+/// Type of a cell.
+///
+/// There are three main kinds of cell types:
+///
+/// - [`Unknown`][Self::Unknown]: nothing is known about the cell type;
+/// - [`Ordinary`][Self::Ordinary]: an ordinary cell, which do not require any special processing;
+/// - *exotic*: exotic cells may be *loaded*, meaning they can automatically be replaced by other
+///   cells when an attempt to deserialize them (*i.e.* to convert them into [`SliceData`] by a
+///   `CTOS` instruction) is made. They may also exhibit a non-trivial behavior when their hashes
+///   are computed.
+///
+///   Exotic cell types include [`PrunedBranch`][Self::PrunedBranch],
+///   [`LibraryReference`][Self::LibraryReference], [`MerkleProof`][Self::MerkleProof], and
+///   [`MerkleUpdate`][Self::MerkleUpdate].
+#[derive(
+    Debug, Clone, Copy, Eq, PartialEq, Hash, num_derive::FromPrimitive, num_derive::ToPrimitive,
+)]
 pub enum CellType {
+    /// Unknown cell type.
     Unknown,
+    /// Ordinary cell type, no special processing required.
     Ordinary,
     PrunedBranch,
     LibraryReference,
     MerkleProof,
     MerkleUpdate,
 }
+impl CellType {
+    /// True if `self` is an ordinary cell type.
+    ///
+    /// ```rust
+    /// # use ton_types::cell::CellType;
+    /// assert!(CellType::Ordinary.is_ordinary());
+    /// assert!(!CellType::Unknown.is_ordinary());
+    /// ```
+    #[inline]
+    pub fn is_ordinary(self) -> bool {
+        self == Self::Ordinary
+    }
 
-#[derive(Debug, Default, Eq, PartialEq, Clone, Copy, Hash)]
-pub struct LevelMask(u8);
+    /// [`u8`] representation of [`Self::Ordinary`].
+    const ORDINARY_CODE: u8 = 0xff;
+    /// [`u8`] representation of [`Self::Unknown`].
+    const UNKNOWN_CODE: u8 = 0;
+    /// [`u8`] representation of [`Self::PrunedBranch`].
+    const PRUNED_BRANCH_CODE: u8 = 1;
+    /// [`u8`] representation of [`Self::LibraryReference`].
+    const LIBRARY_REFERENCE_CODE: u8 = 2;
+    /// [`u8`] representation of [`Self::MerkleProof`].
+    const MERKLE_PROOF_CODE: u8 = 3;
+    /// [`u8`] representation of [`Self::MerkleUpdate`].
+    const MERKLE_UPDATE_CODE: u8 = 4;
+
+    /// Static string description of a cell type.
+    ///
+    /// ```rust
+    /// # use ton_types::cell::CellType;
+    /// assert_eq!(CellType::Ordinary.desc(), "Ordinary");
+    /// assert_eq!(CellType::MerkleUpdate.desc(), "Merkle update");
+    /// ```
+    pub fn desc(self) -> &'static str {
+        match self {
+            Self::Ordinary => "Ordinary",
+            Self::PrunedBranch => "Pruned branch",
+            Self::LibraryReference => "Library reference",
+            Self::MerkleProof => "Merkle proof",
+            Self::MerkleUpdate => "Merkle update",
+            Self::Unknown => "Unknown",
+        }
+    }
+}
+
+impl From<u8> for CellType {
+    fn from(num: u8) -> CellType {
+        if num == Self::PRUNED_BRANCH_CODE {
+            Self::PrunedBranch
+        } else if num == Self::LIBRARY_REFERENCE_CODE {
+            Self::LibraryReference
+        } else if num == Self::MERKLE_PROOF_CODE {
+            Self::MerkleProof
+        } else if num == Self::MERKLE_UPDATE_CODE {
+            Self::MerkleUpdate
+        } else {
+            Self::Unknown
+        }
+    }
+}
+impl From<CellType> for u8 {
+    fn from(ct: CellType) -> u8 {
+        match ct {
+            CellType::Unknown => CellType::UNKNOWN_CODE,
+            CellType::Ordinary => CellType::ORDINARY_CODE,
+            CellType::PrunedBranch => CellType::PRUNED_BRANCH_CODE,
+            CellType::LibraryReference => CellType::LIBRARY_REFERENCE_CODE,
+            CellType::MerkleProof => CellType::MERKLE_PROOF_CODE,
+            CellType::MerkleUpdate => CellType::MERKLE_UPDATE_CODE,
+        }
+    }
+}
+impl fmt::Display for CellType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.desc().fmt(f)
+    }
+}
+
+/// De Brujn level of a cell, usually just called *level* of a cell.
+///
+/// # TODO
+///
+/// Would probably be much better to change the architecture so that no illegal value can be
+/// constructed (while preserving performance).
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash)]
+pub struct LevelMask(
+    /// De Brujn level.
+    u8,
+);
 
 impl LevelMask {
+    /// Constructor from a de Brujn level.
+    ///
+    /// If `level > 3`, an error is issued and the actual level created will be `0`.
+    ///
+    /// # Examples
+    ///
+    /// If `level` is not `0` or `1`, the actual level stored is different from `level`.
+    ///
+    /// ```rust
+    /// # use ton_types::cell::LevelMask;
+    /// fn check(level: u8, expected: u8) {
+    /// #     println!("level: {}, expecting {}", level, expected);
+    ///     let level = LevelMask::with_level(level);
+    /// #     println!("=> {:?}", level);
+    ///     assert_eq!(level.mask(), expected);
+    /// }
+    /// check(0, 0);
+    /// check(1, 1);
+    /// check(2, 3);
+    /// check(3, 7);
+    /// check(4, 0);
+    /// check(5, 0);
+    /// check(17, 0);
+    /// ```
     pub fn with_level(level: u8) -> Self {
         LevelMask(match level {
             0 => 0,
@@ -54,6 +184,32 @@ impl LevelMask {
         })
     }
 
+    /// Constructor from a mask.
+    ///
+    /// If `mask > 7`, an error is issued and the actual mask created will be `0`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// # use ton_types::cell::LevelMask;
+    /// fn check(level: u8, expected: u8) {
+    /// #     println!("level: {}, expecting {}", level, expected);
+    ///     let level = LevelMask::with_mask(level);
+    /// #     println!("=> {:?}", level);
+    ///     assert_eq!(level.mask(), expected);
+    /// }
+    /// check(0, 0);
+    /// check(1, 1);
+    /// check(2, 2);
+    /// check(3, 3);
+    /// check(4, 4);
+    /// check(5, 5);
+    /// check(6, 6);
+    /// check(7, 7);
+    /// check(8, 0);
+    /// check(10, 0);
+    /// check(17, 0);
+    /// ```
     pub fn with_mask(mask: u8) -> Self {
         if mask <= 7 {
             LevelMask(mask)
@@ -63,10 +219,48 @@ impl LevelMask {
         }
     }
 
+    /// Level mask for a Merkle proof cell, from its child cell's mask.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use ton_types::cell::LevelMask;
+    /// let mask = LevelMask::for_merkle_cell(LevelMask::with_level(2));
+    /// assert_eq!(mask.mask(), 1);
+    /// ```
     pub fn for_merkle_cell(children_mask: LevelMask) -> Self {
         LevelMask(children_mask.0 >> 1)
     }
 
+    /// De Brujn level accessor.
+    ///
+    /// # TODO
+    ///
+    /// Functions over [`Copy`] types should (almost) never take `&self`, especially when they
+    /// actually have a size equal to or smaller than pointers (which is the case here). Taking
+    /// `&self` instead of `self` just introduces a useless indirection that needs to be resolved in
+    /// the function.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use ton_types::cell::LevelMask;
+    /// fn check(level: u8, expected: u8) {
+    /// #     println!("level: {}, expecting {}", level, expected);
+    ///     let level = LevelMask::with_level(level);
+    /// #     println!("=> {:?}", level);
+    ///     assert_eq!(level.level(), expected);
+    /// }
+    /// check(0, 0);
+    /// check(1, 1);
+    /// check(2, 2);
+    /// check(3, 3);
+    /// check(4, 0);
+    /// check(7, 0);
+    /// check(8, 0);
+    /// check(10, 0);
+    /// check(17, 0);
+    /// ```
     pub fn level(&self) -> u8 {
         if self.0 > 7 {
             log::error!(target: "tvm", "{} {}", file!(), line!());
@@ -77,33 +271,95 @@ impl LevelMask {
         }
     }
 
+    /// Level mask accessor.
+    ///
+    /// # TODO
+    ///
+    /// Functions over [`Copy`] types should (almost) never take `&self`, especially when they
+    /// actually have a size equal to or smaller than pointers (which is the case here). Taking
+    /// `&self` instead of `self` just introduces a useless indirection that needs to be resolved in
+    /// the function.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use ton_types::cell::LevelMask;
+    /// fn check(level: u8, expected: u8) {
+    /// #     println!("level: {}, expecting {}", level, expected);
+    ///     let level = LevelMask::with_mask(level);
+    /// #     println!("=> {:?}", level);
+    ///     assert_eq!(level.mask(), expected);
+    /// }
+    /// check(0, 0);
+    /// check(1, 1);
+    /// check(2, 2);
+    /// check(3, 3);
+    /// check(4, 4);
+    /// check(5, 5);
+    /// check(6, 6);
+    /// check(7, 7);
+    /// check(8, 0);
+    /// check(10, 0);
+    /// check(17, 0);
+    /// ```
     pub fn mask(&self) -> u8 {
         self.0
     }
 
-    // if cell contains requared hash() - it will be returned,
-    // else = max avaliable, but less then index
-    //
-    // rows - cell mask
-    //       0(0)  1(1)  2(3)  3(7)  columns - index(mask)
-    // 0     0     0     0     0     cells - index(AND result)
-    // 1     0     1(1)  1(1)  1(1)
-    // 2     0     0(0)  1(2)  1(2)
-    // 3     0     1(1)  2(3)  2(3)
-    // 4     0     0(0)  0(0)  1(4)
-    // 5     0     1(1)  0(0)  2(5)
-    // 6     0     0(0)  1(2)  2(6)
-    // 7     0     1(1)  2(3)  3(7)
+    /// Hash of a level mask from an index.
+    ///
+    /// # TODO
+    ///
+    /// Functions over [`Copy`] types should (almost) never take `&self`, especially when they
+    /// actually have a size equal to or smaller than pointers (which is the case here). Taking
+    /// `&self` instead of `self` just introduces a useless indirection that needs to be resolved in
+    /// the function.
+    ///
+    /// Not sure why this function starts with `calc`. Is it to indicate that it performs
+    /// computations? Because [`Self::level`] computes stuff too, but has no `calc_`. Would
+    /// probably be more idiomatic to just call this function `hash_index`.
     pub fn calc_hash_index(&self, mut index: usize) -> usize {
+        // if cell contains requared hash() - it will be returned,
+        // else = max avaliable, but less then index
+        //
+        // rows - cell mask
+        //       0(0)  1(1)  2(3)  3(7)  columns - index(mask)
+        // 0     0     0     0     0     cells - index(AND result)
+        // 1     0     1(1)  1(1)  1(1)
+        // 2     0     0(0)  1(2)  1(2)
+        // 3     0     1(1)  2(3)  2(3)
+        // 4     0     0(0)  0(0)  1(4)
+        // 5     0     1(1)  0(0)  2(5)
+        // 6     0     0(0)  1(2)  2(6)
+        // 7     0     1(1)  2(3)  3(7)
         index = min(index, 3);
         LevelMask::with_mask(self.0 & LevelMask::with_level(index as u8).0).level() as usize
     }
 
+    /// Virtual hash of a level max from an index and a virtual offset.
+    ///
+    /// # TODO
+    ///
+    /// Functions over [`Copy`] types should (almost) never take `&self`, especially when they
+    /// actually have a size equal to or smaller than pointers (which is the case here). Taking
+    /// `&self` instead of `self` just introduces a useless indirection that needs to be resolved in
+    /// the function.
+    ///
+    /// Not sure why this function starts with `calc`. Is it to indicate that it performs
+    /// computations? Because [`Self::level`] computes stuff too, but has no `calc_`. Would
+    /// probably be more idiomatic to just call this function `virtual_hash_index`.
     pub fn calc_virtual_hash_index(&self, index: usize, virt_offset: u8) -> usize {
-        LevelMask::with_mask(self.0 >> virt_offset)
-            .calc_hash_index(index)
+        LevelMask::with_mask(self.0 >> virt_offset).calc_hash_index(index)
     }
 
+    /// Creates a virtual version of a level mask from an offset.
+    ///
+    /// # TODO
+    ///
+    /// Functions over [`Copy`] types should (almost) never take `&self`, especially when they
+    /// actually have a size equal to or smaller than pointers (which is the case here). Taking
+    /// `&self` instead of `self` just introduces a useless indirection that needs to be resolved in
+    /// the function.
     pub fn virtualize(&self, virt_offset: u8) -> Self {
         LevelMask::with_mask(self.0 >> virt_offset)
     }
@@ -111,56 +367,14 @@ impl LevelMask {
 
 impl BitOr for LevelMask {
     type Output = Self;
-
-    // rhs is the "right-hand side" of the expression `a | b`
     fn bitor(self, rhs: Self) -> Self {
+        // rhs is the "right-hand side" of the expression `a | b`
         LevelMask::with_mask(self.0 | rhs.0)
     }
 }
-
 impl BitOrAssign for LevelMask {
     fn bitor_assign(&mut self, rhs: Self) {
         self.0 |= rhs.0;
-    }
-}
-
-impl From<u8> for CellType {
-    fn from(num: u8) -> CellType {
-        match num {
-            1 => CellType::PrunedBranch,
-            2 => CellType::LibraryReference,
-            3 => CellType::MerkleProof,
-            4 => CellType::MerkleUpdate,
-            0xff => CellType::Ordinary,
-            _ => CellType::Unknown,
-        }
-    }
-}
-
-impl From<CellType> for u8 {
-    fn from(ct: CellType) -> u8 {
-        match ct {
-            CellType::Unknown => 0,
-            CellType::Ordinary => 0xff,
-            CellType::PrunedBranch => 1,
-            CellType::LibraryReference => 2,
-            CellType::MerkleProof => 3,
-            CellType::MerkleUpdate => 4,
-        }
-    }
-}
-
-impl fmt::Display for CellType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let msg = match *self {
-            CellType::Ordinary => "Ordinary",
-            CellType::PrunedBranch => "Pruned branch",
-            CellType::LibraryReference => "Library reference",
-            CellType::MerkleProof => "Merkle proof",
-            CellType::MerkleUpdate => "Merkle update",
-            CellType::Unknown => "Unknown",
-        };
-        f.write_str(msg)
     }
 }
 
@@ -188,15 +402,19 @@ pub trait CellImpl: Sync + Send {
         self.cell_type() == CellType::PrunedBranch
     }
 
-    fn tree_bits_count(&self) -> u64 { 0 }
+    fn tree_bits_count(&self) -> u64 {
+        0
+    }
 
-    fn tree_cell_count(&self) -> u64 { 0 }
+    fn tree_cell_count(&self) -> u64 {
+        0
+    }
 }
 
 //#[derive(Clone)]
 pub struct Cell(Arc<dyn CellImpl>);
 
-lazy_static::lazy_static!{
+lazy_static::lazy_static! {
     static ref CELL_COUNT: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
 }
 
@@ -217,16 +435,14 @@ impl Cell {
         if self.level_mask().mask() == 0 {
             self
         } else {
-            Cell::with_cell_impl(
-                VirtualCell::with_cell_and_offset(self, offset)
-            )
+            Cell::with_cell_impl(VirtualCell::with_cell_and_offset(self, offset))
         }
     }
 
     pub fn with_cell_impl<T: 'static + CellImpl>(cell_impl: T) -> Self {
         let ret = Cell(Arc::new(cell_impl));
         CELL_COUNT.fetch_add(1, Ordering::Relaxed);
-        ret  
+        ret
     }
 
     pub fn with_cell_impl_arc(cell_impl: Arc<dyn CellImpl>) -> Self {
@@ -244,7 +460,7 @@ impl Cell {
     }
 
     // TODO: make as simple clone
-    pub fn clone_references(&self) -> SmallVec<[Cell;4]> {
+    pub fn clone_references(&self) -> SmallVec<[Cell; 4]> {
         let count = self.0.references_count();
         let mut refs = SmallVec::with_capacity(count);
         for i in 0..count {
@@ -279,7 +495,7 @@ impl Cell {
 
     pub fn count_cells(&self, max: usize) -> Result<usize> {
         let mut count = 0;
-        let mut queue = vec!(self.clone());
+        let mut queue = vec![self.clone()];
         while let Some(cell) = queue.pop() {
             if count >= max {
                 fail!("count exceeds max {}", max)
@@ -355,22 +571,40 @@ impl Cell {
         to_hex_string(self.data(), self.bit_length(), lower)
     }
 
-    fn print_indent(f: &mut fmt::Formatter, indent: &str, last_child: bool, first_line: bool) -> fmt::Result {
+    fn print_indent(
+        f: &mut fmt::Formatter,
+        indent: &str,
+        last_child: bool,
+        first_line: bool,
+    ) -> fmt::Result {
         let build = match (first_line, last_child) {
             (true, true) => " └─",
             (true, false) => " ├─",
             (false, true) => "   ",
-            (false, false) => " │ "
+            (false, false) => " │ ",
         };
         write!(f, "{}{}", indent, build)
     }
 
-    pub fn format_without_refs(&self, f: &mut fmt::Formatter, indent: &str, last_child: bool,
-                               full: bool, root: bool) -> fmt::Result {
-        if !root { Self::print_indent(f, indent, last_child, true)?; }
+    pub fn format_without_refs(
+        &self,
+        f: &mut fmt::Formatter,
+        indent: &str,
+        last_child: bool,
+        full: bool,
+        root: bool,
+    ) -> fmt::Result {
+        if !root {
+            Self::print_indent(f, indent, last_child, true)?;
+        }
 
         if full {
-            write!(f, "{}   l: {:03b}   ", self.cell_type(), self.level_mask().mask())?;
+            write!(
+                f,
+                "{}   l: {:03b}   ",
+                self.cell_type(),
+                self.level_mask().mask()
+            )?;
         }
 
         write!(f, "bits: {}", self.bit_length())?;
@@ -378,7 +612,9 @@ impl Cell {
 
         if self.data().len() > 100 {
             writeln!(f)?;
-            if !root { Self::print_indent(f, indent, last_child, false)?; }
+            if !root {
+                Self::print_indent(f, indent, last_child, false)?;
+            }
         } else {
             write!(f, "   ")?;
         }
@@ -387,13 +623,17 @@ impl Cell {
 
         if full {
             writeln!(f)?;
-            if !root { Self::print_indent(f, indent, last_child, false)?; }
+            if !root {
+                Self::print_indent(f, indent, last_child, false)?;
+            }
             write!(f, "hashes:")?;
             for h in self.hashes().iter() {
                 write!(f, " {:x}", h)?;
             }
             writeln!(f)?;
-            if !root { Self::print_indent(f, indent, last_child, false)?; }
+            if !root {
+                Self::print_indent(f, indent, last_child, false)?;
+            }
             write!(f, "depths:")?;
             for d in self.depths().iter() {
                 write!(f, " {}", d)?;
@@ -409,18 +649,25 @@ impl Cell {
         last_child: bool,
         full: bool,
         root: bool,
-        remaining_depth: u16) -> std::result::Result<String, fmt::Error> {
+        remaining_depth: u16,
+    ) -> std::result::Result<String, fmt::Error> {
         self.format_without_refs(f, &indent, last_child, full, root)?;
         if remaining_depth > 0 {
             if !root {
                 indent.push(' ');
-                indent.push(if last_child {' '} else {'│'});
+                indent.push(if last_child { ' ' } else { '│' });
             }
             for i in 0..self.references_count() {
                 let child = self.reference(i).unwrap();
                 writeln!(f)?;
                 indent = child.format_with_refs_tree(
-                    f, indent, i == self.references_count() - 1, full, false, remaining_depth - 1)?;
+                    f,
+                    indent,
+                    i == self.references_count() - 1,
+                    full,
+                    false,
+                    remaining_depth - 1,
+                )?;
             }
             if !root {
                 indent.pop();
@@ -429,9 +676,13 @@ impl Cell {
         }
         Ok(indent)
     }
-    fn tree_bits_count(&self) -> u64 { self.0.tree_bits_count() }
+    fn tree_bits_count(&self) -> u64 {
+        self.0.tree_bits_count()
+    }
 
-    fn tree_cell_count(&self) -> u64 { self.0.tree_cell_count() }
+    fn tree_cell_count(&self) -> u64 {
+        self.0.tree_cell_count()
+    }
 }
 
 impl Deref for Cell {
@@ -444,7 +695,8 @@ impl Deref for Cell {
 impl Cell {
     pub fn read_from_file(file_name: &str) -> Self {
         let bytes = std::fs::read(file_name).unwrap();
-        crate::cells_serialization::deserialize_tree_of_cells(&mut std::io::Cursor::new(bytes)).unwrap()
+        crate::cells_serialization::deserialize_tree_of_cells(&mut std::io::Cursor::new(bytes))
+            .unwrap()
     }
     pub fn write_to_file(&self, file_name: &str) {
         let bytes = crate::cells_serialization::serialize_toc(self).unwrap();
@@ -480,8 +732,14 @@ impl fmt::Debug for Cell {
 
 impl fmt::Display for Cell {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.format_with_refs_tree(f, "".to_string(), true, f.alternate(), true,
-                                   min(f.precision().unwrap_or(0), MAX_DEPTH as usize) as u16)?;
+        self.format_with_refs_tree(
+            f,
+            "".to_string(),
+            true,
+            f.alternate(),
+            true,
+            min(f.precision().unwrap_or(0), MAX_DEPTH as usize) as u16,
+        )?;
         Ok(())
     }
 }
@@ -500,10 +758,15 @@ impl fmt::UpperHex for Cell {
 
 impl fmt::Binary for Cell {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.data().iter()
-            .map(|x| format!("{:08b}", *x))
-            .collect::<Vec<_>>().join("")
-            .trim_end_matches('0')
+        write!(
+            f,
+            "{}",
+            self.data()
+                .iter()
+                .map(|x| format!("{:08b}", *x))
+                .collect::<Vec<_>>()
+                .join("")
+                .trim_end_matches('0')
         )
     }
 }
@@ -550,7 +813,7 @@ pub fn append_tag(data: &mut SmallVec<[u8; 128]>, bits: usize) {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CellData {
     cell_type: CellType,
-    data: SmallVec<[u8;128]>,
+    data: SmallVec<[u8; 128]>,
     bit_length: u16,
     level_mask: LevelMask,
     store_hashes: bool,
@@ -572,11 +835,23 @@ impl CellData {
             bit_length: 0,
             level_mask: LevelMask(0),
             store_hashes: false,
-            hashes: Some([UInt256::DEFAULT_CELL_HASH, UInt256::MIN, UInt256::MIN, UInt256::MIN]),
+            hashes: Some([
+                UInt256::DEFAULT_CELL_HASH,
+                UInt256::MIN,
+                UInt256::MIN,
+                UInt256::MIN,
+            ]),
             depths: Some([0; 4]),
         }
     }
-    pub fn with_params(cell_type: CellType, data: impl Into<SmallVec<[u8; 128]>>, level_mask: u8, store_hashes: bool, hashes: Option<[UInt256; 4]>, depths: Option<[u16; 4]>) -> Self {
+    pub fn with_params(
+        cell_type: CellType,
+        data: impl Into<SmallVec<[u8; 128]>>,
+        level_mask: u8,
+        store_hashes: bool,
+        hashes: Option<[UInt256; 4]>,
+        depths: Option<[u16; 4]>,
+    ) -> Self {
         let data = data.into();
         let bit_length = find_tag(data.as_ref());
         assert!(bit_length <= MAX_DATA_BITS);
@@ -644,7 +919,10 @@ impl CellData {
                 unreachable!("cell is not finalized")
             }
         } else if let Some(hashes) = self.hashes().as_ref() {
-            hashes.get(index as usize).cloned().expect("cell is not finalized")
+            hashes
+                .get(index as usize)
+                .cloned()
+                .expect("cell is not finalized")
         } else {
             unreachable!("cell is not finalized")
         }
@@ -721,19 +999,25 @@ impl CellData {
         reader.read_exact(&mut data)?;
         let level_mask = reader.read_byte()?;
         let store_hashes = Self::read_bool(reader)?;
-        let hashes = Self::read_short_array_opt(reader,
-                                                |reader| Ok(UInt256::from(reader.read_u256()?)))?;
-        let depths = Self::read_short_array_opt(reader,
-                                                |reader| Ok(reader.read_le_u16()?))?;
+        let hashes =
+            Self::read_short_array_opt(reader, |reader| Ok(UInt256::from(reader.read_u256()?)))?;
+        let depths = Self::read_short_array_opt(reader, |reader| Ok(reader.read_le_u16()?))?;
 
-        Ok(Self::with_params(cell_type, data, level_mask, store_hashes, hashes, depths))
+        Ok(Self::with_params(
+            cell_type,
+            data,
+            level_mask,
+            store_hashes,
+            hashes,
+            depths,
+        ))
     }
 
     fn read_short_array_opt<R, T, F>(reader: &mut R, read_func: F) -> Result<Option<[T; 4]>>
-        where
-            R: Read,
-            T: Default,
-            F: Fn(&mut R) -> Result<T>
+    where
+        R: Read,
+        T: Default,
+        F: Fn(&mut R) -> Result<T>,
     {
         if Self::read_bool(reader)? {
             Ok(Some(Self::read_short_array(reader, read_func)?))
@@ -746,7 +1030,7 @@ impl CellData {
     where
         R: Read,
         T: Default,
-        F: Fn(&mut R) -> Result<T>
+        F: Fn(&mut R) -> Result<T>,
     {
         let count = reader.read_byte()?;
         if count > 4 {
@@ -763,7 +1047,7 @@ impl CellData {
         match reader.read_byte()? {
             1 => Ok(true),
             0 => Ok(false),
-            _ => fail!(std::io::Error::from(ErrorKind::InvalidData))
+            _ => fail!(std::io::Error::from(ErrorKind::InvalidData)),
         }
     }
 }
@@ -771,7 +1055,7 @@ impl CellData {
 #[derive(Clone, Debug)]
 pub struct DataCell {
     cell_data: CellData,
-    references: SmallVec<[Cell;4]>,
+    references: SmallVec<[Cell; 4]>,
     tree_bits_count: u64,
     tree_cell_count: u64,
 }
@@ -792,7 +1076,13 @@ impl DataCell {
         }
     }
 
-    pub fn with_max_depth(references: impl Into<SmallVec<[Cell; 4]>>, data: impl Into<SmallVec<[u8; 128]>>, cell_type: CellType, level_mask: u8, max_depth: u16) -> Result<DataCell> {
+    pub fn with_max_depth(
+        references: impl Into<SmallVec<[Cell; 4]>>,
+        data: impl Into<SmallVec<[u8; 128]>>,
+        cell_type: CellType,
+        level_mask: u8,
+        max_depth: u16,
+    ) -> Result<DataCell> {
         let cell_data = CellData::with_params(cell_type, data, level_mask, false, None, None);
         let mut tree_bits_count = cell_data.bit_length as u64;
         let mut tree_cell_count = 1;
@@ -811,15 +1101,22 @@ impl DataCell {
         Ok(cell)
     }
 
-    pub fn with_params<TRefs>(refs: TRefs, data: impl Into<SmallVec<[u8; 128]>>, cell_type: CellType, level_mask: u8,
-                              hashes: Option<[UInt256; 4]>, depths: Option<[u16; 4]>) -> Result<DataCell>
-        where
-            TRefs: IntoIterator<Item=Cell>
+    pub fn with_params<TRefs>(
+        refs: TRefs,
+        data: impl Into<SmallVec<[u8; 128]>>,
+        cell_type: CellType,
+        level_mask: u8,
+        hashes: Option<[UInt256; 4]>,
+        depths: Option<[u16; 4]>,
+    ) -> Result<DataCell>
+    where
+        TRefs: IntoIterator<Item = Cell>,
     {
         assert_eq!(hashes.is_some(), depths.is_some());
 
         let store_hashes = hashes.is_some();
-        let cell_data = CellData::with_params(cell_type, data, level_mask, store_hashes, hashes, depths);
+        let cell_data =
+            CellData::with_params(cell_type, data, level_mask, store_hashes, hashes, depths);
         let mut references = SmallVec::new();
         let mut tree_bits_count = cell_data.bit_length as u64;
         let mut tree_cell_count = 1;
@@ -851,54 +1148,98 @@ impl DataCell {
             CellType::PrunedBranch => {
                 // type + level_mask + level * (hashes + depths)
                 if bit_len != 8 * (1 + 1 + (self.level() as usize) * (SHA256_SIZE + 2)) {
-                    fail!("fail creating pruned branch cell: {} != {}", bit_len, 8 * (1 + 1 + (self.level() as usize) * (SHA256_SIZE + 2)))
+                    fail!(
+                        "fail creating pruned branch cell: {} != {}",
+                        bit_len,
+                        8 * (1 + 1 + (self.level() as usize) * (SHA256_SIZE + 2))
+                    )
                 }
                 if !self.references.is_empty() {
-                    fail!("fail creating pruned branch cell: references {} != 0", self.references.len())
+                    fail!(
+                        "fail creating pruned branch cell: references {} != 0",
+                        self.references.len()
+                    )
                 }
                 if self.data()[0] != u8::from(CellType::PrunedBranch) {
-                    fail!("fail creating pruned branch cell: data[0] {} != {}", self.data()[0], u8::from(CellType::PrunedBranch))
+                    fail!(
+                        "fail creating pruned branch cell: data[0] {} != {}",
+                        self.data()[0],
+                        u8::from(CellType::PrunedBranch)
+                    )
                 }
                 if self.data()[1] != self.cell_data.level_mask.0 {
-                    fail!("fail creating pruned branch cell: data[1] {} != {}", self.data()[1], self.cell_data.level_mask.0)
+                    fail!(
+                        "fail creating pruned branch cell: data[1] {} != {}",
+                        self.data()[1],
+                        self.cell_data.level_mask.0
+                    )
                 }
             }
             CellType::MerkleProof => {
                 // type + hash + depth
                 if bit_len != 8 * (1 + SHA256_SIZE + 2) {
-                    fail!("fail creating merkle proof cell: bit_len {} != {}", bit_len, 8 * (1 + SHA256_SIZE + 2))
+                    fail!(
+                        "fail creating merkle proof cell: bit_len {} != {}",
+                        bit_len,
+                        8 * (1 + SHA256_SIZE + 2)
+                    )
                 }
                 if self.references.len() != 1 {
-                    fail!("fail creating merkle proof cell: references {} != 1", self.references.len())
+                    fail!(
+                        "fail creating merkle proof cell: references {} != 1",
+                        self.references.len()
+                    )
                 }
                 // TODO check hashes and depths
             }
             CellType::MerkleUpdate => {
                 // type + 2 * (hash + depth)
                 if bit_len != 8 * (1 + 2 * (SHA256_SIZE + 2)) {
-                    fail!("fail creating merkle unpdate cell: bit_len {} != {}", bit_len, 8 * (1 + 2 * (SHA256_SIZE + 2)))
+                    fail!(
+                        "fail creating merkle unpdate cell: bit_len {} != {}",
+                        bit_len,
+                        8 * (1 + 2 * (SHA256_SIZE + 2))
+                    )
                 }
                 if self.references.len() != 2 {
-                    fail!("fail creating merkle unpdate cell: references {} != 2", self.references.len())
+                    fail!(
+                        "fail creating merkle unpdate cell: references {} != 2",
+                        self.references.len()
+                    )
                 }
                 // TODO check hashes and depths
             }
             CellType::Ordinary => {
                 if bit_len > MAX_DATA_BITS {
-                    fail!("fail creating ordinary cell: bit_len {} > {}", bit_len, MAX_DATA_BITS)
+                    fail!(
+                        "fail creating ordinary cell: bit_len {} > {}",
+                        bit_len,
+                        MAX_DATA_BITS
+                    )
                 }
                 if self.references.len() > MAX_REFERENCES_COUNT {
-                    fail!("fail creating ordinary cell: references {} > {}", self.references.len(), MAX_REFERENCES_COUNT)
+                    fail!(
+                        "fail creating ordinary cell: references {} > {}",
+                        self.references.len(),
+                        MAX_REFERENCES_COUNT
+                    )
                 }
             }
             CellType::LibraryReference => {
                 if bit_len != 8 * (1 + SHA256_SIZE) {
-                    fail!("fail creating libray reference cell: bit_len {} != {}", bit_len, 8 * (1 + SHA256_SIZE))
+                    fail!(
+                        "fail creating libray reference cell: bit_len {} != {}",
+                        bit_len,
+                        8 * (1 + SHA256_SIZE)
+                    )
                 }
                 if !self.references.is_empty() {
-                    fail!("fail creating libray reference cell: references {} != 0", self.references.len())
+                    fail!(
+                        "fail creating libray reference cell: references {} != 0",
+                        self.references.len()
+                    )
+                }
             }
-        }
             CellType::Unknown => {
                 fail!("fail creating unknown cell")
             }
@@ -916,7 +1257,7 @@ impl DataCell {
             CellType::LibraryReference => LevelMask::with_mask(0),
             CellType::MerkleProof => LevelMask::for_merkle_cell(children_mask),
             CellType::MerkleUpdate => LevelMask::for_merkle_cell(children_mask),
-            CellType::Unknown => fail!(ExceptionCode::RangeCheckError)
+            CellType::Unknown => fail!(ExceptionCode::RangeCheckError),
         };
         if self.cell_data.level_mask != level_mask {
             fail!(ExceptionCode::RangeCheckError)
@@ -928,7 +1269,11 @@ impl DataCell {
         let is_pruned_cell = self.is_pruned();
 
         // pruned cell stores all hashes except representetion in data
-        let hashes_count = if is_pruned_cell { 1 } else { self.level() as usize + 1 };
+        let hashes_count = if is_pruned_cell {
+            1
+        } else {
+            self.level() as usize + 1
+        };
 
         let mut depths = [0_u16; 4];
         let mut hashes = [UInt256::MIN; 4];
@@ -947,7 +1292,8 @@ impl DataCell {
                 self.references.len() as u8,
                 level_mask.mask(),
                 self.cell_type() != CellType::Ordinary,
-                false);
+                false,
+            );
             hasher.update(&[d1, d2]);
 
             if i == 0 {
@@ -962,7 +1308,11 @@ impl DataCell {
                 let child_depth = child.depth(if is_merkle_cell { i + 1 } else { i });
                 depths[i] = max(depths[i], child_depth + 1);
                 if ((max_depth != 0) && (depths[i] > max_depth)) || (depths[i] > MAX_DEPTH) {
-                    fail!("fail creating cell: depth {} > {}", depths[i], std::cmp::max(max_depth, MAX_DEPTH))
+                    fail!(
+                        "fail creating cell: depth {} > {}",
+                        depths[i],
+                        std::cmp::max(max_depth, MAX_DEPTH)
+                    )
                 }
                 hasher.update(&child_depth.to_be_bytes());
             }
@@ -1030,7 +1380,10 @@ impl CellImpl for DataCell {
     }
 
     fn reference(&self, index: usize) -> Result<Cell> {
-        self.references.get(index).cloned().ok_or_else(|| error!(ExceptionCode::CellUnderflow))
+        self.references
+            .get(index)
+            .cloned()
+            .ok_or_else(|| error!(ExceptionCode::CellUnderflow))
     }
 
     fn cell_type(&self) -> CellType {
@@ -1053,9 +1406,13 @@ impl CellImpl for DataCell {
         self.cell_data().store_hashes()
     }
 
-    fn tree_bits_count(&self) -> u64 { self.tree_bits_count }
+    fn tree_bits_count(&self) -> u64 {
+        self.tree_bits_count
+    }
 
-    fn tree_cell_count(&self) -> u64 { self.tree_cell_count }
+    fn tree_cell_count(&self) -> u64 {
+        self.tree_cell_count
+    }
 }
 
 #[derive(Clone)]
@@ -1110,10 +1467,12 @@ impl CellImpl for UsageCell {
     }
 
     fn reference(&self, index: usize) -> Result<Cell> {
-        if self.visit_on_load && self.visited.upgrade().is_some() ||
-            self.visit() {
+        if self.visit_on_load && self.visited.upgrade().is_some() || self.visit() {
             let cell = UsageCell::new(
-                self.cell.reference(index)?, self.visit_on_load, self.visited.clone());
+                self.cell.reference(index)?,
+                self.visit_on_load,
+                self.visited.clone(),
+            );
             Ok(Cell::with_cell_impl(cell))
         } else {
             self.cell.reference(index)
@@ -1140,9 +1499,13 @@ impl CellImpl for UsageCell {
         self.cell.store_hashes()
     }
 
-    fn tree_bits_count(&self) -> u64 { self.cell.tree_bits_count() }
+    fn tree_bits_count(&self) -> u64 {
+        self.cell.tree_bits_count()
+    }
 
-    fn tree_cell_count(&self) -> u64 { self.cell.tree_cell_count() }
+    fn tree_cell_count(&self) -> u64 {
+        self.cell.tree_cell_count()
+    }
 }
 
 #[derive(Clone)]
@@ -1153,10 +1516,7 @@ pub struct VirtualCell {
 
 impl VirtualCell {
     pub fn with_cell_and_offset(cell: Cell, offset: u8) -> Self {
-        VirtualCell {
-            offset,
-            cell,
-        }
+        VirtualCell { offset, cell }
     }
 }
 
@@ -1190,20 +1550,30 @@ impl CellImpl for VirtualCell {
     }
 
     fn hash(&self, index: usize) -> UInt256 {
-        self.cell.hash(self.level_mask().calc_virtual_hash_index(index, self.offset))
+        self.cell.hash(
+            self.level_mask()
+                .calc_virtual_hash_index(index, self.offset),
+        )
     }
 
     fn depth(&self, index: usize) -> u16 {
-        self.cell.depth(self.level_mask().calc_virtual_hash_index(index, self.offset))
+        self.cell.depth(
+            self.level_mask()
+                .calc_virtual_hash_index(index, self.offset),
+        )
     }
 
     fn store_hashes(&self) -> bool {
         self.cell.store_hashes()
     }
 
-    fn tree_bits_count(&self) -> u64 { self.cell.tree_bits_count() }
+    fn tree_bits_count(&self) -> u64 {
+        self.cell.tree_bits_count()
+    }
 
-    fn tree_cell_count(&self) -> u64 { self.cell.tree_cell_count() }
+    fn tree_cell_count(&self) -> u64 {
+        self.cell.tree_cell_count()
+    }
 }
 
 #[derive(Default)]
@@ -1222,9 +1592,11 @@ impl UsageTree {
 
     pub fn with_params(root: Cell, visit_on_load: bool) -> Self {
         let visited = Arc::new(lockfree::set::Set::new());
-        let root = Cell::with_cell_impl_arc(Arc::new(
-            UsageCell::new(root, visit_on_load, Arc::downgrade(&visited))
-        ));
+        let root = Cell::with_cell_impl_arc(Arc::new(UsageCell::new(
+            root,
+            visit_on_load,
+            Arc::downgrade(&visited),
+        )));
         Self { root, visited }
     }
 
@@ -1270,8 +1642,8 @@ pub use self::builder::*;
 mod builder_operations;
 
 pub use self::builder_operations::*;
-use std::io::{Write, Read, ErrorKind};
 use smallvec::SmallVec;
+use std::io::{ErrorKind, Read, Write};
 
 pub(crate) fn to_hex_string(data: &[u8], len: usize, lower: bool) -> String {
     if len == 0 {
@@ -1294,8 +1666,7 @@ pub(crate) fn to_hex_string(data: &[u8], len: usize, lower: bool) -> String {
         4 => {
             result.pop();
         }
-        _ => result.push('_')
+        _ => result.push('_'),
     }
     result
 }
-
