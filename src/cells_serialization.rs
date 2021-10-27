@@ -447,9 +447,9 @@ pub fn deserialize_cells_tree_ex<T>(src: &mut T) -> Result<(Vec<Cell>, BocSerial
         fail!("offset size has to be  less or equal 8, actual value: {}", offset_size)
     }
 
-    let cells_count = src.read_be_uint(ref_size)?; // cells:(##(size * 8))
-    let roots_count = src.read_be_uint(ref_size)?; // roots:(##(size * 8))
-    let _absent_count = src.read_be_uint(ref_size)?; // absent:(##(size * 8)) { roots + absent <= cells }
+    let cells_count = src.read_be_uint(ref_size)? as usize; // cells:(##(size * 8))
+    let roots_count = src.read_be_uint(ref_size)? as usize; // roots:(##(size * 8))
+    let _absent_count = src.read_be_uint(ref_size)? as usize; // absent:(##(size * 8)) { roots + absent <= cells }
 
     if (magic == BOC_INDEXED_TAG || magic == BOC_INDEXED_CRC32_TAG) && roots_count > 1 {
         fail!("roots count has to be less or equal 1 for TAG: {}, value: {}", magic, offset_size)
@@ -632,7 +632,7 @@ fn deserialize_cell<T>(
 
     let mut references = SmallVec::with_capacity(refs);
     for _ in 0..refs {
-        let i = src.read_be_uint(ref_size)?;
+        let i = src.read_be_uint(ref_size)? as usize;
         if i > cells_count || i <= cell_index {
             fail!("reference out of range, {} < (value: {}) <= {}", cells_count, i, cell_index)
         } else {
