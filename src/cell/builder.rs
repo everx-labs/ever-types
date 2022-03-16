@@ -11,23 +11,48 @@
 * limitations under the License.
 */
 
-use std::convert::From;
-use std::fmt;
+//! TVM cell builder.
+//!
+//! TODO: this module should be private, as [`BuilderData`] is re-exported as
+//! [`crate::cell::BuilderData`].
+
+use std::{convert::From, fmt};
 
 use smallvec::SmallVec;
 
-use crate::{MAX_DATA_BITS, error, fail};
-use crate::cell::{append_tag, Cell, CellType, DataCell, find_tag, LevelMask, SliceData};
-use crate::types::{ExceptionCode, Result};
+use crate::{
+    cell::{append_tag, find_tag, Cell, CellType, DataCell, LevelMask, SliceData},
+    error, fail,
+    types::{ExceptionCode, Result},
+    MAX_DATA_BITS,
+};
 
 const EXACT_CAPACITY: usize = 128;
 
+/// A *TVM cell builder*, or *builder* for short.
+///
+/// A *builder* is an incomplete cell that supports fast operations of appending bitstrings,
+/// integers, other cells, and references to other cells at its end. Builders are used for packing
+/// (or serializing) data from the top of the stack into new cells, *e.g.* before transferring them
+/// to persistent storage.
+///
+/// [`BuilderData`], like [`SliceData`]s, can only appear as values in a TVM stack. They cannot be
+/// stored in *memory* (tree of cells) or *persistent storage* (which is also a bag of cells).
+///
+/// Note that a TVM program does not have much use for *Cell* values, because they are immutable and
+/// opaque. All cell manipulation primitives require that a *Cell* value be transformed into either
+/// [`BuilderData`] or [`SliceData`] before it can be modified or inspected.
 #[derive(Debug, PartialEq, Clone, Eq)]
 pub struct BuilderData {
+    /// Vector of data.
     data: SmallVec<[u8; 128]>,
+    /// Current length of the data.
     length_in_bits: usize,
+    /// Vector of cell references.
     references: SmallVec<[Cell; 4]>,
+    /// Type of the cell being constructed.
     cell_type: CellType,
+    /// De Brujn level of the cell being constructed.
     level_mask: LevelMask,
 }
 
@@ -104,18 +129,23 @@ impl Default for BuilderData {
 }
 
 impl BuilderData {
-    pub fn default() -> Self { Self::new() }
+    pub fn default() -> Self {
+        Self::new()
+    }
     pub fn new() -> Self {
         BuilderData {
             data: SmallVec::new(),
             length_in_bits: 0,
-            references:SmallVec::new(),
+            references: SmallVec::new(),
             cell_type: CellType::Ordinary,
             level_mask: LevelMask(0),
         }
     }
 
-    pub fn with_raw(data: impl Into<SmallVec<[u8; 128]>>, length_in_bits: usize) -> Result<BuilderData> {
+    pub fn with_raw(
+        data: impl Into<SmallVec<[u8; 128]>>,
+        length_in_bits: usize,
+    ) -> Result<BuilderData> {
         let mut data = data.into();
         if length_in_bits > data.len() * 8 {
             fail!(ExceptionCode::FatalError)
@@ -141,9 +171,13 @@ impl BuilderData {
         })
     }
 
-    pub fn with_raw_and_refs<TRefs>(data: impl Into<SmallVec<[u8; 128]>>, length_in_bits: usize, refs: TRefs) -> Result<BuilderData>
+    pub fn with_raw_and_refs<TRefs>(
+        data: impl Into<SmallVec<[u8; 128]>>,
+        length_in_bits: usize,
+        refs: TRefs,
+    ) -> Result<BuilderData>
     where
-        TRefs: IntoIterator<Item = Cell>
+        TRefs: IntoIterator<Item = Cell>,
     {
         let mut builder = BuilderData::with_raw(data, length_in_bits)?;
         for value in refs.into_iter() {
@@ -167,7 +201,9 @@ impl BuilderData {
     }
 
     /// finalize cell allowing maximal depth
-    pub fn into_cell(self) -> Result<Cell> { self.finalize(0) }
+    pub fn into_cell(self) -> Result<Cell> {
+        self.finalize(0)
+    }
 
     /// use max_depth to limit depth
     pub fn finalize(mut self, max_depth: u16) -> Result<Cell> {
@@ -180,15 +216,13 @@ impl BuilderData {
         }
         append_tag(&mut self.data, self.length_in_bits);
 
-        Ok(Cell::with_cell_impl(
-            DataCell::with_max_depth(
-                self.references,
-                self.data,
-                self.cell_type,
-                self.level_mask.mask(),
-                max_depth,
-            )?
-        ))
+        Ok(Cell::with_cell_impl(DataCell::with_max_depth(
+            self.references,
+            self.data,
+            self.cell_type,
+            self.level_mask.mask(),
+            max_depth,
+        )?))
     }
 
     pub fn references(&self) -> &[Cell] {
@@ -202,7 +236,7 @@ impl BuilderData {
     // TODO: refactor it compare directly in BuilderData
     pub fn compare_data(&self, other: &Self) -> Result<(Option<usize>, Option<usize>)> {
         if self == other {
-            return Ok((None, None))
+            return Ok((None, None));
         }
         let label1 = SliceData::from(self.clone().into_cell()?);
         let label2 = SliceData::from(other.clone().into_cell()?);
@@ -210,7 +244,7 @@ impl BuilderData {
         // unwraps are safe because common_prefix returns None if slice is empty
         Ok((
             rem1.map(|rem| rem.get_bit(0).expect("check common_prefix function") as usize),
-            rem2.map(|rem| rem.get_bit(0).expect("check common_prefix function") as usize)
+            rem2.map(|rem| rem.get_bit(0).expect("check common_prefix function") as usize),
         ))
     }
 
@@ -219,7 +253,7 @@ impl BuilderData {
         let references = (0..refs_count)
             .map(|i| slice.reference(i).unwrap())
             .collect::<SmallVec<_>>();
-        
+
         let mut builder = slice.remaining_data();
         builder.references = references;
         builder.cell_type = slice.cell_type();
@@ -339,16 +373,21 @@ impl BuilderData {
 
     pub fn replace_data(&mut self, data: impl Into<SmallVec<[u8; 128]>>, length_in_bits: usize) {
         let data = data.into();
-        self.length_in_bits = std::cmp::min(std::cmp::min(length_in_bits, MAX_DATA_BITS), data.len() * 8);
+        self.length_in_bits =
+            std::cmp::min(std::cmp::min(length_in_bits, MAX_DATA_BITS), data.len() * 8);
         self.data = data;
     }
 
     pub fn replace_reference_cell(&mut self, index: usize, child: Cell) {
         match self.references.get_mut(index) {
             None => {
-                log::error!("replacing not existed cell by index {} with cell hash {:x}", index, child.repr_hash());
+                log::error!(
+                    "replacing not existed cell by index {} with cell hash {:x}",
+                    index,
+                    child.repr_hash()
+                );
             }
-            Some(old) => *old = child
+            Some(old) => *old = child,
         }
     }
 
@@ -387,7 +426,13 @@ impl BuilderData {
 
 impl fmt::Display for BuilderData {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "data: {} len: {} reference count: {}", hex::encode(&self.data), self.length_in_bits, self.references.len())
+        write!(
+            f,
+            "data: {} len: {} reference count: {}",
+            hex::encode(&self.data),
+            self.length_in_bits,
+            self.references.len()
+        )
     }
 }
 

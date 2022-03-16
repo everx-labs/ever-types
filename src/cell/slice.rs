@@ -17,14 +17,26 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::{Bound, Range, RangeBounds};
 
-use crate::{error, fail, cell::{BuilderData, Cell, CellType, IBitstring, LevelMask}, parse_slice_base};
 use crate::types::{ExceptionCode, Result, UInt256};
+use crate::{
+    cell::{BuilderData, Cell, CellType, IBitstring, LevelMask},
+    error, fail, parse_slice_base,
+};
 use smallvec::SmallVec;
 
+/// A slice (window) of a [`Cell`].
+///
+/// A slice is actually two slices:
+///
+/// - the *data window*, ranging over the target cell's data;
+/// - the *reference window*, ranging over the target cell's references.
 #[derive(Eq, Clone)]
 pub struct SliceData {
+    /// Target cell, the cell being referenced.
     pub(super) cell: Cell,
+    /// Window over the target's data.
     data_window: Range<usize>,
+    /// Window over the target's cell references.
     references_window: Range<usize>,
 }
 
@@ -44,12 +56,12 @@ impl Ord for SliceData {
                 for i in 0..len {
                     let ordering = vec1[i].cmp(&vec2[i]);
                     if ordering != cmp::Ordering::Equal {
-                        return ordering
+                        return ordering;
                     }
                 }
                 cmp::Ordering::Equal
             }
-            ordering => ordering
+            ordering => ordering,
         }
     }
 }
@@ -62,12 +74,12 @@ impl Hash for SliceData {
         }
     }
 }
+
 impl PartialEq for SliceData {
     fn eq(&self, slice: &SliceData) -> bool {
         let refs_count = self.remaining_references();
         let bit_len = self.remaining_bits();
-        if (bit_len != slice.remaining_bits()) || 
-           (refs_count != slice.remaining_references()) {
+        if (bit_len != slice.remaining_bits()) || (refs_count != slice.remaining_references()) {
             return false;
         }
         let mut offset = 0;
@@ -77,7 +89,10 @@ impl PartialEq for SliceData {
             }
             offset += 8
         }
-        if (bit_len > offset) && (self.get_bits(offset, bit_len - offset).unwrap() != slice.get_bits(offset, bit_len - offset).unwrap()) {
+        if (bit_len > offset)
+            && (self.get_bits(offset, bit_len - offset).unwrap()
+                != slice.get_bits(offset, bit_len - offset).unwrap())
+        {
             return false;
         }
         for i in 0..refs_count {
@@ -85,7 +100,7 @@ impl PartialEq for SliceData {
             let ref2 = slice.reference(i).unwrap();
             if ref1 != ref2 {
                 return false;
-            } 
+            }
         }
         true
     }
@@ -97,8 +112,8 @@ impl Default for SliceData {
             cell: Cell::default(),
             data_window: 0..0,
             references_window: 0..0,
+        }
     }
-}
 }
 
 // TBD
@@ -133,13 +148,24 @@ impl From<Cell> for SliceData {
         SliceData {
             references_window: 0..cell.references_count(),
             data_window: 0..cell.bit_length(),
-            cell
+            cell,
         }
     }
 }
 
 impl SliceData {
-    // TODO: need to be const
+    /// Creates a slice pointing to an empty cell.
+    ///
+    /// ```rust
+    /// # use ton_types::cell::SliceData;
+    /// let slice = SliceData::default();
+    /// assert_eq!(slice.remaining_bits(), 0);
+    /// assert_eq!(slice.remaining_references(), 0);
+    /// ```
+    ///
+    /// # TODO
+    ///
+    /// - needs to be const.
     pub fn default() -> SliceData {
         Self {
             cell: Cell::default(),
@@ -152,7 +178,8 @@ impl SliceData {
     }
 
     pub fn from_string(value: &str) -> Result<SliceData> {
-        let vec = parse_slice_base(value, 0, 16).ok_or_else(|| error!(ExceptionCode::FatalError))?;
+        let vec =
+            parse_slice_base(value, 0, 16).ok_or_else(|| error!(ExceptionCode::FatalError))?;
         Ok(BuilderData::with_bitstring(vec)?.into_cell()?.into())
     }
 
@@ -176,18 +203,20 @@ impl SliceData {
         let start = match range.start_bound() {
             Bound::Included(start) => *start,
             Bound::Excluded(start) => start + 1,
-            Bound::Unbounded => 0
+            Bound::Unbounded => 0,
         };
         let end = match range.end_bound() {
             Bound::Included(end) => end + 1,
             Bound::Excluded(end) => *end,
-            Bound::Unbounded => data_len
+            Bound::Unbounded => data_len,
         };
         if (start <= end) && (end <= data_len) {
             let mut slice = self.clone();
-            if start != 0 { // return prefix
+            if start != 0 {
+                // return prefix
                 slice.data_window.end = slice.data_window.start + start;
-            } else { // return suffix
+            } else {
+                // return suffix
                 slice.data_window.start += end;
             }
             slice.references_window = 0..0;
@@ -205,12 +234,12 @@ impl SliceData {
         let start = match range.start_bound() {
             Bound::Included(start) => *start,
             Bound::Excluded(start) => start + 1,
-            Bound::Unbounded => 0
+            Bound::Unbounded => 0,
         };
         let end = match range.end_bound() {
             Bound::Included(end) => end + 1,
             Bound::Excluded(end) => *end,
-            Bound::Unbounded => refs_count
+            Bound::Unbounded => refs_count,
         };
 
         let mut vec = vec![];
@@ -227,21 +256,27 @@ impl SliceData {
         let start = self.data_window.start / 8;
         let end = self.data_window.end / 8;
         if self.data_window.start >= self.data_window.end {
-            return BuilderData::new()
+            return BuilderData::new();
         }
         let trailing = self.data_window.start % 8;
         if trailing == 0 {
             BuilderData::with_raw(
                 SmallVec::from_slice(&self.cell.data()[start..=end]),
-                self.remaining_bits()
-            ).unwrap()
+                self.remaining_bits(),
+            )
+            .unwrap()
         } else if trailing + self.remaining_bits() <= 8 {
             let vec = vec![self.cell.data()[start] << trailing];
             BuilderData::with_raw(vec, self.remaining_bits()).unwrap()
         } else {
             let vec = vec![self.cell.data()[start] << trailing];
             let mut builder = BuilderData::with_raw(vec, 8 - trailing).unwrap();
-            builder.append_raw(& self.cell.data()[start + 1..=end], trailing + self.remaining_bits() - 8).unwrap();
+            builder
+                .append_raw(
+                    &self.cell.data()[start + 1..=end],
+                    trailing + self.remaining_bits() - 8,
+                )
+                .unwrap();
             builder
         }
     }
@@ -259,7 +294,7 @@ impl SliceData {
         for offset in (0..self.remaining_bits()).rev() {
             if self.get_bit_opt(offset) == Some(true) {
                 self.data_window.end = self.data_window.start + offset;
-                break
+                break;
             }
         }
     }
@@ -279,18 +314,24 @@ impl SliceData {
     pub fn storage(&self) -> &[u8] {
         self.cell.data()
     }
-    /// returns internal cell regardless window settings
+
+    /// Returns the target [`Cell`].
     pub fn cell(&self) -> &Cell {
         &self.cell
     }
+
     /// constructs new cell trunking original regarding window settings
     pub fn into_cell(self) -> Cell {
-        if self.references_window.start == 0 && self.data_window.start == 0
+        if self.references_window.start == 0
+            && self.data_window.start == 0
             && self.references_window.end == self.cell.references_count()
-            && self.data_window.end == self.cell.bit_length() {
+            && self.data_window.end == self.cell.bit_length()
+        {
             self.cell
         } else {
-            BuilderData::from_slice(&self).into_cell().expect("it must not fail because builder made from cell cut by slice")
+            BuilderData::from_slice(&self)
+                .into_cell()
+                .expect("it must not fail because builder made from cell cut by slice")
         }
     }
 
@@ -301,9 +342,12 @@ impl SliceData {
             fail!(ExceptionCode::CellUnderflow)
         }
     }
+
     fn drain_reference(&mut self) -> Cell {
         self.references_window.start += 1;
-        self.cell.reference(self.references_window.start - 1).unwrap()
+        self.cell
+            .reference(self.references_window.start - 1)
+            .unwrap()
     }
 
     pub fn get_references(&self) -> Range<usize> {
@@ -339,7 +383,8 @@ impl SliceData {
     }
 
     pub fn get_bit(&self, offset: usize) -> Result<bool> {
-        self.get_bit_opt(offset).ok_or_else(|| error!(ExceptionCode::CellUnderflow))
+        self.get_bit_opt(offset)
+            .ok_or_else(|| error!(ExceptionCode::CellUnderflow))
     }
 
     pub fn get_bits(&self, offset: usize, bits: usize) -> Result<u8> {
@@ -377,7 +422,9 @@ impl SliceData {
             fail!(ExceptionCode::CellUnderflow)
         }
         let bytes = bits / 8;
-        let mut vec = (0..bytes).map(|i| self.get_byte(i * 8).unwrap()).collect::<Vec<_>>();
+        let mut vec = (0..bytes)
+            .map(|i| self.get_byte(i * 8).unwrap())
+            .collect::<Vec<_>>();
         let remainder = bits % 8;
         if remainder != 0 {
             let v = self.get_bits(bytes * 8, remainder)?;
@@ -394,7 +441,9 @@ impl SliceData {
     }
 
     pub fn get_next_bit_int(&mut self) -> Result<usize> {
-        Ok(self.get_next_bit_opt().ok_or(ExceptionCode::CellUnderflow)?)
+        Ok(self
+            .get_next_bit_opt()
+            .ok_or(ExceptionCode::CellUnderflow)?)
     }
 
     pub fn get_next_bit_opt(&mut self) -> Option<usize> {
@@ -414,7 +463,7 @@ impl SliceData {
             fail!(ExceptionCode::CellUnderflow)
         }
         if bits == 0 {
-            return Ok(0)
+            return Ok(0);
         }
         if bits > 64 {
             // get_next_int_bytes
@@ -505,7 +554,9 @@ impl SliceData {
         if bytes * 8 > self.remaining_bits() {
             fail!(ExceptionCode::CellUnderflow)
         }
-        Ok((0..bytes).map(|_| self.get_next_byte().unwrap()).collect::<Vec<_>>())
+        Ok((0..bytes)
+            .map(|_| self.get_next_byte().unwrap())
+            .collect::<Vec<_>>())
     }
 
     pub fn get_bytestring(&self, mut offset: usize) -> Vec<u8> {
@@ -565,12 +616,15 @@ impl SliceData {
                     log::warn!(target: "tvm", "unreachable in erase_prefix {} {}", self, prefix);
                     self.shrink_data(0..0);
                     true
-                },
+                }
             }
         }
     }
 
-    pub fn common_prefix(a: &SliceData, b: &SliceData) -> (Option<SliceData>, Option<SliceData>, Option<SliceData>) {
+    pub fn common_prefix(
+        a: &SliceData,
+        b: &SliceData,
+    ) -> (Option<SliceData>, Option<SliceData>, Option<SliceData>) {
         let mut offset = 0;
         let max_possible_prefix_length_in_bits = cmp::min(a.remaining_bits(), b.remaining_bits());
         while (offset + 8) <= max_possible_prefix_length_in_bits {
@@ -614,16 +668,27 @@ impl SliceData {
         }
 
         (
-            if prefix.remaining_bits() > 0 { Some(prefix) } else { None },
-            if rem_a.remaining_bits() > 0 { Some(rem_a) } else { None },
-            if rem_b.remaining_bits() > 0 { Some(rem_b) } else { None },
+            if prefix.remaining_bits() > 0 {
+                Some(prefix)
+            } else {
+                None
+            },
+            if rem_a.remaining_bits() > 0 {
+                Some(rem_a)
+            } else {
+                None
+            },
+            if rem_b.remaining_bits() > 0 {
+                Some(rem_b)
+            } else {
+                None
+            },
         )
     }
 
     pub fn overwrite_prefix(&mut self, prefix: &SliceData) -> Result<()> {
         if prefix.is_empty() {
             Ok(())
-
         } else if self.remaining_bits() < prefix.remaining_bits() {
             fail!("Prefix should be fully in self")
         } else {
@@ -667,7 +732,9 @@ impl SliceData {
 
     // #[deprecated]
     #[allow(clippy::wrong_self_convention)]
-    pub fn to_hex_string(&self) -> String { self.as_hex_string() }
+    pub fn to_hex_string(&self) -> String {
+        self.as_hex_string()
+    }
 
     pub fn as_hex_string(&self) -> String {
         let len = self.remaining_bits();
@@ -677,9 +744,9 @@ impl SliceData {
     }
 
     pub fn is_full_cell_slice(&self) -> bool {
-        self.data_window.start == 0 && 
-        self.data_window.end == self.cell.bit_length() &&
-        self.remaining_references() == self.cell.references_count()
+        self.data_window.start == 0
+            && self.data_window.end == self.cell.bit_length()
+            && self.remaining_references() == self.cell.references_count()
     }
 }
 
@@ -690,18 +757,29 @@ impl SliceData {
     pub fn new(data: Vec<u8>) -> SliceData {
         match crate::find_tag(data.as_slice()) {
             0 => SliceData::default(),
-            length_in_bits => BuilderData::with_raw(data, length_in_bits).unwrap().into_cell().unwrap().into()
+            length_in_bits => BuilderData::with_raw(data, length_in_bits)
+                .unwrap()
+                .into_cell()
+                .unwrap()
+                .into(),
         }
     }
 
     pub fn from_raw(data: Vec<u8>, length_in_bits: usize) -> SliceData {
-        BuilderData::with_raw(data, length_in_bits).unwrap().into_cell().unwrap().into()
+        BuilderData::with_raw(data, length_in_bits)
+            .unwrap()
+            .into_cell()
+            .unwrap()
+            .into()
     }
 
     pub fn append_reference(&mut self, other: SliceData) -> &mut SliceData {
         let mut builder = BuilderData::from_slice(self);
         builder.append_reference_cell(other.into_cell());
-        *self = builder.into_cell().expect("it should be used only in tests").into();
+        *self = builder
+            .into_cell()
+            .expect("it should be used only in tests")
+            .into();
         self
     }
 
@@ -751,4 +829,3 @@ impl fmt::UpperHex for SliceData {
         write!(f, "{}", super::to_hex_string(data.as_slice(), len, false))
     }
 }
-
