@@ -122,7 +122,7 @@ impl UInt256 {
     }
 
     pub fn first_u64(&self) -> u64 {
-        u64::from_le_bytes(self.0[0..8].try_into().unwrap())
+        u64::from_be_bytes(self.0[0..8].try_into().unwrap())
     }
 
     pub fn from_raw(data: Vec<u8>, length: usize) -> Self {
@@ -331,7 +331,9 @@ pub enum ExceptionCode {
     #[fail(display = "fatal error")]
     FatalError = 12,
     #[fail(display = "out of gas")]
-    OutOfGas = 13
+    OutOfGas = 13,
+    #[fail(display = "illegal instruction")]
+    IllegalInstruction = 14
 }
 
 /*

@@ -666,10 +666,10 @@ pub trait HashmapType {
                 let right = Self::make_cell_with_label_and_data(right, next_bit_len, is_leaf2, &other)?;
                 let (root, _) = Self::make_fork(&prefix, bit_len, left.into_cell()?, right.into_cell()?, false)?;
                 *self.data_mut() = Some(root.into_cell()?);
+                Ok(())
             }
-            _ => fail!("Cannot merge")
+            result => fail!("Cannot merge {} {:?}", std::any::type_name::<Self>(), result)
         }
-        Ok(())
     }
 
     fn scan_diff<F>(&self, other: &Self, mut func: F) -> Result<bool> 
