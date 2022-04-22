@@ -409,7 +409,8 @@ impl Cell {
         last_child: bool,
         full: bool,
         root: bool,
-        remaining_depth: u16) -> std::result::Result<String, fmt::Error> {
+        remaining_depth: u16
+    ) -> std::result::Result<String, fmt::Error> {
         self.format_without_refs(f, &indent, last_child, full, root)?;
         if remaining_depth > 0 {
             if !root {
@@ -792,14 +793,19 @@ impl DataCell {
         }
     }
 
-    pub fn with_max_depth(references: impl Into<SmallVec<[Cell; 4]>>, data: impl Into<SmallVec<[u8; 128]>>, cell_type: CellType, level_mask: u8, max_depth: u16) -> Result<DataCell> {
-        let cell_data = CellData::with_params(cell_type, data, level_mask, false, None, None);
+    fn construct_cell(cell_data: CellData, references: SmallVec<[Cell; 4]>, max_depth: u16) -> Result<DataCell> {
+        const MAX_56_BITS: u64 = 0x00FF_FFFF_FFFF_FFFFu64;
         let mut tree_bits_count = cell_data.bit_length as u64;
-        let mut tree_cell_count = 1;
-        let references = references.into();
+        let mut tree_cell_count = 1u64;
         for reference in &references {
-            tree_bits_count += reference.tree_bits_count();
-            tree_cell_count += reference.tree_cell_count();
+            tree_bits_count = tree_bits_count.saturating_add(reference.tree_bits_count());
+            tree_cell_count = tree_cell_count.saturating_add(reference.tree_cell_count());
+        }
+        if tree_bits_count > MAX_56_BITS {
+            tree_bits_count = MAX_56_BITS;
+        }
+        if tree_cell_count > MAX_56_BITS {
+            tree_cell_count = MAX_56_BITS;
         }
         let mut cell = DataCell {
             cell_data,
@@ -811,31 +817,31 @@ impl DataCell {
         Ok(cell)
     }
 
+    pub fn with_max_depth(
+        references: impl Into<SmallVec<[Cell; 4]>>,
+        data: impl Into<SmallVec<[u8; 128]>>,
+        cell_type: CellType,
+        level_mask: u8,
+        max_depth: u16
+    ) -> Result<DataCell> {
+        let cell_data = CellData::with_params(cell_type, data, level_mask, false, None, None);
+        let references = references.into();
+        Self::construct_cell(cell_data, references, max_depth)
+    }
+
     pub fn with_params<TRefs>(refs: TRefs, data: impl Into<SmallVec<[u8; 128]>>, cell_type: CellType, level_mask: u8,
                               hashes: Option<[UInt256; 4]>, depths: Option<[u16; 4]>) -> Result<DataCell>
         where
             TRefs: IntoIterator<Item=Cell>
     {
-        assert_eq!(hashes.is_some(), depths.is_some());
+        if hashes.is_some() != depths.is_some() {
+            fail!("hashes and depths must be both Some or None")
+        }
 
         let store_hashes = hashes.is_some();
         let cell_data = CellData::with_params(cell_type, data, level_mask, store_hashes, hashes, depths);
-        let mut references = SmallVec::new();
-        let mut tree_bits_count = cell_data.bit_length as u64;
-        let mut tree_cell_count = 1;
-        for reference in refs.into_iter() {
-            tree_bits_count += reference.tree_bits_count();
-            tree_cell_count += reference.tree_cell_count();
-            references.push(reference);
-        }
-        let mut cell = DataCell {
-            cell_data,
-            references,
-            tree_bits_count,
-            tree_cell_count,
-        };
-        cell.finalize(true, 0)?;
-        Ok(cell)
+        let references = refs.into_iter().collect();
+        Self::construct_cell(cell_data, references, 0)
     }
 
     fn finalize(&mut self, force: bool, max_depth: u16) -> Result<()> {

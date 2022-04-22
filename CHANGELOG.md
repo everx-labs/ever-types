@@ -2,10 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
-## Version: 1.10.13
+## Version: 1.10.14
 
 ### New
- - Merge to master
+ - fix tree calculation (#147)
 
 
 
