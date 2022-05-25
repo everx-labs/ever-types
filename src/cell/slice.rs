@@ -225,14 +225,14 @@ impl SliceData {
 
     pub fn remaining_data(&self) -> BuilderData {
         let start = self.data_window.start / 8;
-        let end = self.data_window.end / 8;
+        let end = (self.data_window.end + 7) / 8;
         if self.data_window.start >= self.data_window.end {
             return BuilderData::new()
         }
         let trailing = self.data_window.start % 8;
         if trailing == 0 {
             BuilderData::with_raw(
-                SmallVec::from_slice(&self.cell.data()[start..=end]),
+                SmallVec::from_slice(&self.cell.data()[start..end]),
                 self.remaining_bits()
             ).unwrap()
         } else if trailing + self.remaining_bits() <= 8 {
@@ -241,7 +241,7 @@ impl SliceData {
         } else {
             let vec = vec![self.cell.data()[start] << trailing];
             let mut builder = BuilderData::with_raw(vec, 8 - trailing).unwrap();
-            builder.append_raw(& self.cell.data()[start + 1..=end], trailing + self.remaining_bits() - 8).unwrap();
+            builder.append_raw(& self.cell.data()[start + 1..end], trailing + self.remaining_bits() - 8).unwrap();
             builder
         }
     }
@@ -519,6 +519,15 @@ impl SliceData {
             ret.push(self.get_bits(offset, remainder).unwrap() << (8 - remainder));
         }
         ret
+    }
+
+    /// Returns Cell from references if present and next bit in slice is one
+    pub fn get_next_dictionary(&mut self) -> Result<Option<Cell>> {
+        if self.get_next_bit()? {
+            Ok(Some(self.checked_drain_reference()?))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Returns subslice of current slice and moves pointer

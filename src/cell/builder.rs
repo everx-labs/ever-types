@@ -69,7 +69,10 @@ impl From<&mut BuilderData> for SliceData {
 
 impl From<&&Cell> for BuilderData {
     fn from(cell: &&Cell) -> Self {
-        let mut builder = BuilderData::with_bitstring(SmallVec::from_slice(cell.data())).unwrap();
+        let mut builder = BuilderData::with_raw(
+            SmallVec::from_slice(cell.data()),
+            cell.bit_length()
+        ).unwrap();
         builder.references = cell.clone_references();
         builder.cell_type = cell.cell_type();
         builder.level_mask = cell.level_mask();
@@ -79,21 +82,13 @@ impl From<&&Cell> for BuilderData {
 
 impl From<&Cell> for BuilderData {
     fn from(cell: &Cell) -> Self {
-        let mut builder = BuilderData::with_bitstring(SmallVec::from_slice(cell.data())).unwrap();
-        builder.references = cell.clone_references();
-        builder.cell_type = cell.cell_type();
-        builder.level_mask = cell.level_mask();
-        builder
+        (&cell).into()
     }
 }
 
 impl From<Cell> for BuilderData {
     fn from(cell: Cell) -> Self {
-        let mut builder = BuilderData::with_bitstring(SmallVec::from_slice(cell.data())).unwrap();
-        builder.references = cell.clone_references();
-        builder.cell_type = cell.cell_type();
-        builder.level_mask = cell.level_mask();
-        builder
+        (&&cell).into()
     }
 }
 
@@ -182,8 +177,8 @@ impl BuilderData {
 
         Ok(Cell::with_cell_impl(
             DataCell::with_max_depth(
-                self.references,
-                self.data,
+                self.references.to_vec(),
+                &self.data,
                 self.cell_type,
                 self.level_mask.mask(),
                 max_depth,

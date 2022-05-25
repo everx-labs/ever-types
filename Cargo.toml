@@ -18,7 +18,11 @@
 edition = '2018'
 build = 'build.rs'
 name = 'ton_types'
-version = '1.10.14'
+version = '1.11.0'
+
+[[bin]]
+name = 'test_cells'
+path = 'bin/test_cells.rs'
 
 [dependencies]
 lockfree = { git = 'https://github.com/tonlabs/lockfree.git' }

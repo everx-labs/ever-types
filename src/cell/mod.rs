@@ -13,17 +13,23 @@
 
 use crate::{error, fail};
 use crate::types::{ExceptionCode, Result, UInt256, ByteOrderRead};
-use crate::cells_serialization::{SHA256_SIZE, BagOfCells};
-use std::sync::{Arc, Weak, atomic::{AtomicU64, Ordering}};
-use std::fmt;
-use std::ops::{BitOr, BitOrAssign, Deref};
+use std::{
+    sync::{Arc, Weak, atomic::{AtomicU64, Ordering}},
+    fmt,
+    ops::{BitOr, BitOrAssign, Deref},
+    {cmp::{max, min}, io::{Read, Write, ErrorKind}},
+    convert::TryInto,
+};
 use sha2::{Sha256, Digest};
-use std::cmp::{max, min};
 use num::{FromPrimitive, ToPrimitive};
 
+pub const SHA256_SIZE: usize = 32;
+pub const DEPTH_SIZE: usize = 2;
 pub const MAX_REFERENCES_COUNT: usize = 4;
 pub const MAX_DATA_BITS: usize = 1023;
+pub const MAX_DATA_BYTES: usize = 128; // including tag
 pub const MAX_LEVEL: usize = 3;
+pub const MAX_LEVEL_MASK: u8 = 7;
 pub const MAX_DEPTH: u16 = u16::MAX - 1;
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy, Hash)]
@@ -48,7 +54,7 @@ impl LevelMask {
             2 => 3,
             3 => 7,
             _ => {
-                log::error!(target: "tvm", "{} {}", file!(), line!());
+                log::error!("{} {}", file!(), line!());
                 0
             }
         })
@@ -58,7 +64,7 @@ impl LevelMask {
         if mask <= 7 {
             LevelMask(mask)
         } else {
-            log::error!(target: "tvm", "{} {}", file!(), line!());
+            log::error!("{} {}", file!(), line!());
             LevelMask(0)
         }
     }
@@ -69,7 +75,7 @@ impl LevelMask {
 
     pub fn level(&self) -> u8 {
         if self.0 > 7 {
-            log::error!(target: "tvm", "{} {}", file!(), line!());
+            log::error!("{} {}", file!(), line!());
             255
         } else {
             // count of set bits (low three)
@@ -166,6 +172,7 @@ impl fmt::Display for CellType {
 
 pub trait CellImpl: Sync + Send {
     fn data(&self) -> &[u8];
+    fn raw_data(&self) -> Result<&[u8]>;
     fn cell_data(&self) -> &CellData;
     fn bit_length(&self) -> usize;
     fn references_count(&self) -> usize;
@@ -198,6 +205,7 @@ pub struct Cell(Arc<dyn CellImpl>);
 
 lazy_static::lazy_static!{
     static ref CELL_COUNT: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
+    // static ref FINALIZATION_NANOS: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
 }
 
 impl Clone for Cell {
@@ -239,6 +247,10 @@ impl Cell {
         CELL_COUNT.load(Ordering::Relaxed)
     }
 
+    // pub fn finalization_nanos() -> u64 {
+    //     FINALIZATION_NANOS.load(Ordering::Relaxed)
+    // }
+
     pub fn reference(&self, index: usize) -> Result<Cell> {
         self.0.reference(index)
     }
@@ -255,6 +267,10 @@ impl Cell {
 
     pub fn data(&self) -> &[u8] {
         self.0.data()
+    }
+
+    fn raw_data(&self) -> Result<&[u8]> {
+        self.0.raw_data()
     }
 
     pub fn cell_data(&self) -> &CellData {
@@ -352,7 +368,16 @@ impl Cell {
     }
 
     pub fn to_hex_string(&self, lower: bool) -> String {
-        to_hex_string(self.data(), self.bit_length(), lower)
+        let bit_length = self.bit_length();
+        if bit_length % 8 == 0 {
+            if lower {
+                hex::encode(self.data())
+            } else {
+                hex::encode_upper(self.data())
+            }
+        } else {
+            to_hex_string(self.data(), self.bit_length(), lower)
+        }
     }
 
     fn print_indent(f: &mut fmt::Formatter, indent: &str, last_child: bool, first_line: bool) -> fmt::Result {
@@ -501,11 +526,25 @@ impl fmt::UpperHex for Cell {
 
 impl fmt::Binary for Cell {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.data().iter()
-            .map(|x| format!("{:08b}", *x))
-            .collect::<Vec<_>>().join("")
-            .trim_end_matches('0')
-        )
+        let bitlen = self.bit_length();
+        if bitlen % 8 == 0 {
+            write!(
+                f, 
+                "{}", 
+                self.data().iter()
+                    .map(|x| format!("{:08b}", *x))
+                    .collect::<Vec<_>>().join("")
+            )
+        } else {
+            let data = self.data();
+            for b in &data[..data.len() - 1] {
+                write!(f, "{:08b}", b)?;
+            }
+            for i in (8 - (bitlen % 8)..8).rev() {
+                write!(f, "{:b}", (data[data.len() - 1] >> i) & 1)?;
+            }
+            Ok(())
+        }
     }
 }
 
@@ -548,15 +587,378 @@ pub fn append_tag(data: &mut SmallVec<[u8; 128]>, bits: usize) {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct CellData {
-    cell_type: CellType,
-    data: SmallVec<[u8;128]>,
-    bit_length: u16,
+// Cell layout:
+// [D1] [D2] [data: 0..128 bytes] (hashes: 0..4 big endian u256) (depths: 0..4 big endian u16)
+// first byte is so called desription byte 1:
+// | level mask| store hashes| exotic| refs count|
+// |      7 6 5|            4|      3|      2 1 0|
+pub(crate) const LEVELMASK_D1_OFFSET: usize = 5;
+pub(crate) const HASHES_D1_FLAG: u8 = 16;
+pub(crate) const EXOTIC_D1_FLAG: u8 = 8;
+pub(crate) const REFS_D1_MASK: u8 = 7;
+pub(crate) const ABSENT_D1: u8 = (1 << 4) | 7;
+// next byte is desription byte 2 contains data size (in special encoding, see cell_data_len)
+
+#[inline(always)]
+pub(crate) fn calc_d1(
     level_mask: LevelMask,
     store_hashes: bool,
+    cell_type: CellType,
+    refs_count: usize
+) -> u8 {
+    (level_mask.mask() << LEVELMASK_D1_OFFSET) |
+    (store_hashes as u8 * HASHES_D1_FLAG) |
+    ((cell_type != CellType::Ordinary) as u8 * EXOTIC_D1_FLAG) |
+    refs_count as u8
+}
+
+#[inline(always)]
+pub(crate) fn calc_d2(data_bit_len: usize) -> u8{
+    ((data_bit_len / 8) << 1) as u8 + (data_bit_len % 8 != 0) as u8
+}
+
+// A lot of helper-functions which incapsulates cell's layout.
+// All this functions (except returning Result) can panic in case of going out of slice bounds.
+#[inline(always)]
+pub(crate) fn level(buf: &[u8]) -> u8 {
+    level_mask(buf).level()
+}
+
+#[inline(always)]
+pub(crate) fn level_mask(buf: &[u8]) -> LevelMask {
+    debug_assert!(buf.len() >= 1);
+    LevelMask::with_mask(buf[0] >> LEVELMASK_D1_OFFSET)
+}
+
+#[inline(always)]
+pub(crate) fn store_hashes(buf: &[u8]) -> bool {
+    if absent(buf) {
+        false
+    } else {
+        debug_assert!(buf.len() >= 1);
+        (buf[0] & HASHES_D1_FLAG) == HASHES_D1_FLAG
+    }
+}
+
+#[inline(always)]
+pub(crate) fn exotic(buf: &[u8]) -> bool {
+    debug_assert!(buf.len() >= 1);
+    (buf[0] & EXOTIC_D1_FLAG) == EXOTIC_D1_FLAG
+}
+
+#[inline(always)]
+pub(crate) fn cell_type(buf: &[u8]) -> CellType {
+    // exotic?
+    if !exotic(buf) { 
+        // no
+        CellType::Ordinary 
+    } else {
+        // yes
+        CellType::from(cell_data(buf)[0]) 
+    }
+}
+
+#[inline(always)]
+pub(crate) fn refs_count(buf: &[u8]) -> usize {
+    if absent(buf) {
+        0
+    } else {
+        debug_assert!(buf.len() >= 1);
+        (buf[0] & REFS_D1_MASK) as usize
+    }
+}
+
+#[inline(always)]
+// absent cells are depricated. We support it only for "node se".
+// It contains only one description byte (constant) and hash.
+pub(crate) fn absent(buf: &[u8]) -> bool {
+    debug_assert!(buf.len() >= 1);
+    buf[0] == ABSENT_D1
+}
+
+#[inline(always)]
+pub(crate) fn cell_data_len(buf: &[u8]) -> usize {
+    if absent(buf) {
+        SHA256_SIZE
+    } else {
+        debug_assert!(buf.len() >= 2);
+        ((buf[1] >> 1) + (buf[1] & 1)) as usize
+    }
+}
+
+#[inline(always)]
+pub(crate) fn bit_len(buf: &[u8]) -> usize {
+    if absent(buf) {
+        SHA256_SIZE * 8
+    } else {
+        debug_assert!(buf.len() >= 2);
+        if buf[1] & 1 == 0 {
+            (buf[1] >> 1) as usize * 8
+        } else {
+            find_tag(cell_data(buf))
+        }
+    }
+}
+
+#[inline(always)]
+pub(crate) fn data_offset(buf: &[u8]) -> usize {
+    if absent(buf) {
+        1
+    } else {
+        2 + (store_hashes(buf) as usize) * hashes_count(buf) * (SHA256_SIZE + DEPTH_SIZE)
+    }
+}
+
+#[inline(always)]
+pub(crate) fn cell_data(buf: &[u8]) -> &[u8] {
+    let data_offset = data_offset(buf);
+    let cell_data_len = cell_data_len(buf);
+    debug_assert!(buf.len() >= data_offset + cell_data_len);
+    &buf[data_offset..data_offset + cell_data_len]
+}
+
+#[inline(always)]
+pub(crate) fn hashes_count(buf: &[u8]) -> usize {
+    // to get cell type we need to calculate data's offset, but we can't do it without hashes_count
+    // So we will calculate cell type by some indirect signs
+    let cell_type = if !exotic(buf) {
+        CellType::Ordinary
+    } else {
+        let refs = refs_count(buf);
+        match refs {
+            1 => CellType::MerkleProof,
+            2 => CellType::MerkleUpdate,
+            0 => {
+                if level(buf) == 0 {
+                    CellType::LibraryReference
+                } else {
+                    CellType::PrunedBranch
+                }
+            }
+            _ => CellType::Unknown,
+        }
+    };
+
+    if cell_type == CellType::PrunedBranch {
+        1
+    } else {
+        level(buf) as usize + 1
+    }
+}
+
+#[inline(always)]
+pub(crate) fn full_len(buf: &[u8]) -> usize {
+    data_offset(buf) + cell_data_len(buf)
+}
+
+#[inline(always)]
+pub(crate) fn hashes_len(buf: &[u8]) -> usize {
+    hashes_count(buf) * SHA256_SIZE
+}
+
+#[allow(dead_code)]
+#[inline(always)]
+pub(crate) fn hashes(buf: &[u8]) -> &[u8] {
+    debug_assert!(store_hashes(buf));
+    let hashes_len = hashes_len(buf);
+    debug_assert!(buf.len() >= 2 + hashes_len);
+    &buf[2..2 + hashes_len]
+}
+
+#[inline(always)]
+pub(crate) fn hash(buf: &[u8], index: usize) -> &[u8] {
+    debug_assert!(store_hashes(buf));
+    let offset = 2 + index * SHA256_SIZE;
+    debug_assert!(buf.len() >= offset + SHA256_SIZE);
+    &buf[offset..offset + SHA256_SIZE]
+}
+
+#[inline(always)]
+pub(crate) fn depths_offset(buf: &[u8]) -> usize {
+    2 + hashes_len(buf)
+}
+
+#[allow(dead_code)]
+#[inline(always)]
+pub(crate) fn depths_len(buf: &[u8]) -> usize {
+    hashes_count(buf) * DEPTH_SIZE
+}
+
+#[allow(dead_code)]
+#[inline(always)]
+pub(crate) fn depths(buf: &[u8]) -> &[u8] {
+    debug_assert!(store_hashes(buf));
+    let offset = depths_offset(buf);
+    let depths_len = depths_len(buf);
+    debug_assert!(buf.len() >= offset + depths_len);
+    &buf[offset..offset + depths_len]
+}
+
+#[inline(always)]
+pub(crate) fn depth(buf: &[u8], index: usize) -> u16 {
+    debug_assert!(store_hashes(buf));
+    let offset = depths_offset(buf) + index * DEPTH_SIZE;
+    let d = &buf[offset..offset + DEPTH_SIZE];
+    ((d[0] as u16) << 8) | (d[1] as u16) 
+}
+
+fn build_cell_buf(
+    cell_type: CellType,
+    data: &[u8], // with completion tag!
+    level_mask: u8,
+    refs: usize,
+    store_hashes: bool,
     hashes: Option<[UInt256; 4]>,
-    depths: Option<[u16; 4]>,
+    depths: Option<[u16; 4]>
+) -> Result<Vec<u8>> {
+    if cell_type != CellType::Ordinary && data.len() == 1{
+        fail!("Exotic cell can't have empty data");
+    }
+    if data.len() > MAX_DATA_BYTES {
+        fail!("Cell's data can't has {} length", data.len());
+    }
+    if refs > MAX_REFERENCES_COUNT {
+        fail!("Cell can't has {} refs", refs);
+    }
+    if level_mask > MAX_LEVEL_MASK {
+        fail!("Level mask can't be {}", level_mask);
+    }
+
+    let data_bit_len = find_tag(&data);
+    let data_len = (data_bit_len / 8) + (data_bit_len % 8 != 0) as usize;
+    let level_mask = LevelMask::with_mask(level_mask);
+    let level = level_mask.level();
+    let hashes_count = if store_hashes {
+        if cell_type == CellType::PrunedBranch { 1 } else { level as usize + 1 }
+    } else {
+        0
+    };
+    let full_length = 2 + data_len + hashes_count * (SHA256_SIZE + DEPTH_SIZE);
+
+    debug_assert!(refs <= MAX_REFERENCES_COUNT);
+    debug_assert!(data.len() <= MAX_DATA_BYTES);
+    debug_assert!(hashes.is_some() == depths.is_some());
+    debug_assert!(level_mask.mask() <= MAX_LEVEL_MASK);
+    debug_assert!(data.len() >= data_len);
+
+    let mut buf = vec![0; full_length];
+    buf[0] = calc_d1(level_mask, store_hashes, cell_type, refs);
+    buf[1] = calc_d2(data_bit_len);
+    let mut offset = 2;
+    if store_hashes {
+        if hashes.is_none() || depths.is_none() {
+            fail!("`hashes` or `depths` can't be none while `store_hashes` is true");
+        }
+        if let Some(hashes) = hashes {
+            for i in 0..hashes_count {
+                buf[offset..offset + SHA256_SIZE].copy_from_slice(hashes[i].as_slice());
+                offset += SHA256_SIZE;
+            }
+        }
+        if let Some(depths) = depths {
+            for i in 0..hashes_count {
+                buf[offset] = (depths[i] >> 8) as u8;
+                buf[offset + 1] = (depths[i] & 0xff) as u8;
+                offset += DEPTH_SIZE;
+            }
+        }
+    }
+    buf[offset..offset + data_len].copy_from_slice(&data[..data_len]);
+    Ok(buf)
+}
+
+#[inline(always)]
+fn set_hash(buf: &mut [u8], index: usize, hash: &[u8]) {
+    debug_assert!(index <= level(buf) as usize);
+    debug_assert!(hash.len() == SHA256_SIZE);
+    let offset = 2 + index * SHA256_SIZE;
+    debug_assert!(buf.len() >= offset + SHA256_SIZE);
+    buf[offset..offset + SHA256_SIZE].copy_from_slice(hash);
+}
+
+#[inline(always)]
+fn set_depth(buf: &mut [u8], index: usize, depth: u16) {
+    debug_assert!(index <= level(buf) as usize);
+    let offset = depths_offset(buf) + index * DEPTH_SIZE;
+    debug_assert!(buf.len() >= offset + DEPTH_SIZE);
+    buf[offset] = (depth >> 8) as u8;
+    buf[offset + 1] = (depth & 0xff) as u8;
+}
+
+fn check_cell_buf(buf: &[u8], unbounded: bool) -> Result<()> {
+    if buf.len() < 2 {
+        fail!("Buffer is too small to read description bytes")
+    }
+
+    if absent(buf) {
+        let full_data_len = full_len(buf);
+        if buf.len() < full_data_len {
+            fail!("buf is too small to fit absent cell");
+        }
+        if !unbounded && buf.len() > full_data_len {
+            fail!("buf is too big for absent cell");
+        }
+    } else {
+
+        let refs_count = refs_count(buf);
+        if refs_count > MAX_REFERENCES_COUNT {
+            fail!("Too big references count: {}", refs_count);
+        }
+
+        let full_data_len = full_len(buf);
+        if buf.len() < full_data_len {
+            fail!("Buffer is too small ({}) to fit cell ({})", buf.len(), full_data_len);
+        }
+        if !unbounded && buf.len() > full_data_len {
+            log::warn!("Buffer is too big ({}), needed only {} to fit cell", buf.len(), full_data_len);
+        }
+
+        let cell_data = cell_data(buf);
+        let data_bit_len = find_tag(cell_data);
+        let expected_len = data_bit_len / 8 + (data_bit_len % 8 != 0) as usize;
+        if cell_data.len() != expected_len {
+            log::warn!("Data len wrote in description byte 2 ({} byte) is not correspond real length \
+                calculated by tag ({} byte, {} bit)", cell_data.len(), expected_len, data_bit_len);
+        }
+    }
+
+    Ok(())
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum CellBuffer {
+    Local(Vec<u8>),
+    External{
+        buf: Arc<Vec<u8>>,
+        offset: usize,
+    }
+}
+
+impl CellBuffer {
+    pub fn data(&self) -> &[u8] {
+        match &self {
+            CellBuffer::Local(d) => d,
+            CellBuffer::External{ buf, offset} => &buf[*offset..*offset + full_len(&buf[*offset..])]
+        }
+    }
+    pub fn unbounded_data(&self) -> &[u8] {
+        match &self {
+            CellBuffer::Local(d) => d,
+            CellBuffer::External{ buf, offset} => &buf[*offset..]
+        }
+    }
+    pub fn unbounded_data_mut(&mut self) -> Result<&mut [u8]> {
+        match self {
+            CellBuffer::Local(d) => Ok(d),
+            CellBuffer::External{ buf: _, offset: _} => fail!("Can't change extarnal buffer")
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CellData {
+    buf: CellBuffer,
+    hashes_depths: Vec<(UInt256, u16)>,
 }
 
 impl Default for CellData {
@@ -567,148 +969,201 @@ impl Default for CellData {
 
 impl CellData {
     pub fn new() -> Self {
-        Self {
-            cell_type: CellType::Ordinary,
-            data: SmallVec::new(),
-            bit_length: 0,
-            level_mask: LevelMask(0),
-            store_hashes: false,
-            hashes: Some([UInt256::DEFAULT_CELL_HASH, UInt256::MIN, UInt256::MIN, UInt256::MIN]),
-            depths: Some([0; 4]),
-        }
+        Self::with_params(
+            CellType::Ordinary,
+            &[80],
+            0,
+            0,
+            false,
+            None,
+            None
+        ).unwrap()
     }
-    pub fn with_params(cell_type: CellType, data: impl Into<SmallVec<[u8; 128]>>, level_mask: u8, store_hashes: bool, hashes: Option<[UInt256; 4]>, depths: Option<[u16; 4]>) -> Self {
-        let data = data.into();
-        let bit_length = find_tag(data.as_ref());
-        assert!(bit_length <= MAX_DATA_BITS);
-        Self {
-            cell_type,
-            data,
-            bit_length: bit_length as u16,
-            level_mask: LevelMask::with_mask(level_mask),
-            store_hashes,
-            hashes,
-            depths,
+
+    pub fn with_params(
+        cell_type: CellType,
+        data: &[u8], // with complition tag!
+        level_mask: u8,
+        refs: u8,
+        store_hashes: bool,
+        hashes: Option<[UInt256; 4]>,
+        depths: Option<[u16; 4]>
+    ) -> Result<Self> {
+        let buffer = build_cell_buf(cell_type, data, level_mask, refs as usize, store_hashes, hashes, depths)?;
+        debug_assert!(check_cell_buf(&buffer[..], false).is_ok());
+        let hashes_count = if cell_type == CellType::PrunedBranch {
+            1
+        } else {
+            level(&buffer) as usize + 1
+        };
+        let allocate_for_hashes = (!store_hashes) as usize * hashes_count;
+        let mut hashes_depths = Vec::with_capacity(allocate_for_hashes);
+        match (store_hashes, hashes, depths) {
+            (true, _, _) => (),
+            (_, None, None) => (),
+            (false, Some(hashes), Some(depths)) => {
+                for i in 0..hashes_count {
+                    hashes_depths.push((hashes[i], depths[i]));
+                }
+            }
+            _ => fail!("`hashes` and `depths` existence are not correspond each other")
         }
+        Ok(Self{
+            buf: CellBuffer::Local(buffer),
+            hashes_depths
+        })
+    }
+
+    pub fn with_external_data(buffer: &Arc<Vec<u8>>, offset: usize) -> Result<Self> {
+
+        check_cell_buf(&buffer[offset..], true)?;
+
+        let allocate_for_hashes = (!store_hashes(&buffer[offset..])) as usize * (level(&buffer[offset..]) as usize + 1);
+        Ok(Self{
+            buf: CellBuffer::External{
+                buf: buffer.clone(),
+                offset,
+            },
+            hashes_depths: Vec::with_capacity(allocate_for_hashes)
+        })
+    }
+
+    pub fn with_raw_data(data: Vec<u8>) -> Result<Self> {
+
+        check_cell_buf(&data, false)?;
+
+        let allocate_for_hashes = (!store_hashes(&data)) as usize * (level(&data) as usize + 1);
+        Ok(Self{
+            buf: CellBuffer::Local(data),
+            hashes_depths: Vec::with_capacity(allocate_for_hashes)
+        })
+    }
+
+    pub fn raw_data(&self) -> &[u8] {
+        self.buf.data()
     }
 
     pub fn cell_type(&self) -> CellType {
-        self.cell_type
+        cell_type(self.buf.unbounded_data())
     }
 
+    // Might be without tag!!!
     pub fn data(&self) -> &[u8] {
-        &self.data
+        cell_data(self.buf.unbounded_data())
     }
 
-    pub fn bit_length(&self) -> u16 {
-        self.bit_length
+    pub fn bit_length(&self) -> usize {
+        bit_len(self.buf.unbounded_data())
     }
 
     pub fn level(&self) -> u8 {
-        self.level_mask.level()
+        level(self.buf.unbounded_data())
     }
 
     pub fn level_mask(&self) -> LevelMask {
-        self.level_mask
+        level_mask(self.buf.unbounded_data())
     }
 
     pub fn store_hashes(&self) -> bool {
-        self.store_hashes
+        store_hashes(self.buf.unbounded_data())
     }
 
-    pub fn hashes(&self) -> Option<&[UInt256; 4]> {
-        self.hashes.as_ref()
+    pub fn references_count(&self) -> usize {
+        refs_count(self.buf.unbounded_data())
     }
 
-    fn set_hashes(&mut self, hashes: Option<[UInt256; 4]>) {
-        self.hashes = hashes
+    fn set_hash_depth(&mut self, index: usize, hash: &[u8], depth: u16) -> Result<()> {
+        if self.store_hashes() {
+            set_hash(self.buf.unbounded_data_mut()?, index, hash);
+            set_depth(self.buf.unbounded_data_mut()?, index, depth);
+        } else {
+            debug_assert!(self.hashes_depths.len() == index);
+            self.hashes_depths.push((hash.into(), depth));
+        }
+        Ok(())
     }
 
-    pub fn depths(&self) -> Option<&[u16; 4]> {
-        self.depths.as_ref()
+    pub fn hash(&self, index: usize) -> UInt256 {
+        self.raw_hash(index).into()
     }
 
-    fn set_depths(&mut self, depths: Option<[u16; 4]>) {
-        self.depths = depths
-    }
-
-    pub fn hash(&self, mut index: usize) -> UInt256 {
-        index = self.level_mask.calc_hash_index(index);
+    pub fn raw_hash(&self, mut index: usize) -> &[u8] {
+        index = self.level_mask().calc_hash_index(index);
         if self.cell_type() == CellType::PrunedBranch {
             // pruned cell stores all hashes (except representation) in data
             if index != self.level() as usize {
                 let offset = 1 + 1 + index * SHA256_SIZE;
-                UInt256::from_slice(&self.data()[offset..offset + SHA256_SIZE])
-            } else if let Some(hashes) = self.hashes.as_ref() {
-                hashes[0].clone()
+                return &self.data()[offset..offset + SHA256_SIZE]
             } else {
-                unreachable!("cell is not finalized")
+                index = 0;
             }
-        } else if let Some(hashes) = self.hashes().as_ref() {
-            hashes.get(index as usize).cloned().expect("cell is not finalized")
+        }
+        if self.store_hashes() {
+            hash(self.buf.unbounded_data(), index)
         } else {
-            unreachable!("cell is not finalized")
+            self.hashes_depths[index].0.as_slice()
         }
     }
 
     pub fn depth(&self, mut index: usize) -> u16 {
-        index = self.level_mask.calc_hash_index(index);
+        index = self.level_mask().calc_hash_index(index);
         if self.cell_type() == CellType::PrunedBranch {
             // pruned cell stores all depth except "representetion" in data
             if index != self.level() as usize {
-                let offset = 1 + 1 + (self.level() as usize) * SHA256_SIZE + index * 2;
-                if offset + 2 <= self.data().len() {
-                    let mut depth = [0; 2];
-                    depth.copy_from_slice(&self.data()[offset..offset + 2]);
-                    return u16::from_be_bytes(depth);
-                }
-            } else if let Some(depths) = self.depths() {
-                if let Some(d) = depths.get(0) {
-                    return *d;
-                }
+                // type + level_mask + level * (hashes + depths)
+                let offset = 1 + 1 + (self.level() as usize) * SHA256_SIZE + index * DEPTH_SIZE;
+                let data = self.data();
+                return ((data[offset] as u16) << 8) | (data[offset + 1] as u16);
+            } else {
+                index = 0;
             }
-        } else if let Some(depths) = self.depths() {
-            if let Some(d) = depths.get(index as usize) {
-                return *d;
-            }
+        } 
+        if self.store_hashes() {
+            depth(self.buf.unbounded_data(), index)
+        } else {
+            self.hashes_depths[index].1
         }
-        log::error!(target: "tvm", "cell is not finalized");
-        0
     }
 
-    /// Binary serialization of cell data
+    /// Binary serialization of cell data.
+    /// Strange things here were made for compatibility
     pub fn serialize<T: Write>(&self, writer: &mut T) -> Result<()> {
-        writer.write_all(&[self.cell_type.to_u8().unwrap()])?;
-        writer.write_all(&self.bit_length.to_le_bytes())?;
-        writer.write_all(&self.data[0..(self.bit_length as usize + 8) / 8])?;
-        writer.write_all(&[self.level_mask.0])?;
-        writer.write_all(&[if self.store_hashes { 1 } else { 0 }])?;
-        if let Some(ref hashes) = self.hashes {
-            let mut len = hashes.len();
-            if let Some(pos) = hashes.iter().position(|hash| hash == &UInt256::MIN) {
-                len = std::cmp::min(len, pos);
-            }
-            writer.write_all(&[1])?;
-            writer.write_all(&[len as u8])?;
-            for hash in hashes.iter().take(len) {
-                writer.write_all(hash.as_slice())?;
+        let bitlen = self.bit_length();
+        writer.write_all(&[self.cell_type().to_u8().unwrap()])?;
+        writer.write_all(&(bitlen as u16).to_le_bytes())?;
+        writer.write_all(&self.data()[0..bitlen / 8 + (bitlen % 8 != 0) as usize])?;
+        if bitlen % 8 == 0 {
+            writer.write_all(&[0])?;// for compatibility
+        }
+        writer.write_all(&[self.level_mask().0])?;
+        writer.write_all(&[self.store_hashes() as u8])?;
+        let hashes_count = hashes_count(self.buf.unbounded_data());
+        writer.write_all(&[1])?;
+        writer.write_all(&[hashes_count as u8])?;
+        if self.store_hashes() {
+            for i in 0..hashes_count {
+                let hash = hash(self.buf.unbounded_data(), i);
+                writer.write_all(hash)?;
             }
         } else {
-            writer.write_all(&[0])?;
-        }
-        if let Some(ref depths) = self.depths {
-            let mut len = depths.len();
-            if let Some(pos) = depths.iter().position(|depth| depth == &0) {
-                len = std::cmp::min(len, pos);
+            debug_assert!(hashes_count == self.hashes_depths.len());
+            for (hash, _depth) in &self.hashes_depths {
+                writer.write_all(hash.as_slice())?;
             }
-            writer.write_all(&[1])?;
-            writer.write_all(&[len as u8])?;
-            for depth in depths.iter().take(len) {
+        }
+        writer.write_all(&[1])?;
+        writer.write_all(&[hashes_count as u8])?;
+        if self.store_hashes() {
+            for i in 0..hashes_count {
+                let depth = depth(self.buf.unbounded_data(), i);
                 writer.write_all(&depth.to_le_bytes())?;
             }
         } else {
-            writer.write_all(&[0])?;
+            for (_hash, depth) in &self.hashes_depths {
+                writer.write_all(&depth.to_le_bytes())?;
+            }
         }
+        writer.write_all(&[self.references_count() as u8])?;
         Ok(())
     }
 
@@ -716,18 +1171,30 @@ impl CellData {
     pub fn deserialize<T: Read>(reader: &mut T) -> Result<Self> {
         let cell_type: CellType = FromPrimitive::from_u8(reader.read_byte()?)
             .ok_or_else(|| std::io::Error::from(ErrorKind::InvalidData))?;
-        let bit_length = reader.read_le_u16()?;
-        let data_len = ((bit_length + 8) / 8) as usize;
-        let mut data = vec![0; data_len]; //todo optimize
-        reader.read_exact(&mut data)?;
+        let bitlen = reader.read_le_u16()? as usize;
+        let data_len = bitlen / 8 + (bitlen % 8 != 0) as usize;
+        let data = if bitlen % 8 == 0 {
+            let mut data = vec![0; data_len + 1];
+            reader.read_exact(&mut data[..data_len])?;
+            let _ = reader.read_byte()?; // for compatibility
+            data[data_len] = 0x80;
+            data
+        } else {
+            let mut data = vec![0; data_len];
+            reader.read_exact(&mut data)?;
+            data
+        };
         let level_mask = reader.read_byte()?;
         let store_hashes = Self::read_bool(reader)?;
+
         let hashes = Self::read_short_array_opt(reader,
                                                 |reader| Ok(UInt256::from(reader.read_u256()?)))?;
         let depths = Self::read_short_array_opt(reader,
                                                 |reader| Ok(reader.read_le_u16()?))?;
 
-        Ok(Self::with_params(cell_type, data, level_mask, store_hashes, hashes, depths))
+        let refs = reader.read_byte()?;
+
+        Self::with_params(cell_type, &data, level_mask, refs, store_hashes, hashes, depths)
     }
 
     fn read_short_array_opt<R, T, F>(reader: &mut R, read_func: F) -> Result<Option<[T; 4]>>
@@ -772,7 +1239,7 @@ impl CellData {
 #[derive(Clone, Debug)]
 pub struct DataCell {
     cell_data: CellData,
-    references: SmallVec<[Cell;4]>,
+    references: Vec<Cell>, // TODO make array - you already know cells refs count, or may be vector
     tree_bits_count: u64,
     tree_cell_count: u64,
 }
@@ -785,17 +1252,64 @@ impl Default for DataCell {
 
 impl DataCell {
     pub fn new() -> Self {
-        Self {
-            cell_data: CellData::new(),
-            references: SmallVec::new(),
-            tree_bits_count: 0,
-            tree_cell_count: 1,
-        }
+        Self::with_params(
+            vec!(),
+            &[0x80],
+            CellType::Ordinary,
+            0,
+            None,
+            None
+        ).unwrap()
     }
 
-    fn construct_cell(cell_data: CellData, references: SmallVec<[Cell; 4]>, max_depth: u16) -> Result<DataCell> {
+    pub fn with_max_depth(
+        references: Vec<Cell>, 
+        data: &[u8], // with completion tag!
+        cell_type: CellType, 
+        level_mask: u8, 
+        max_depth: u16
+    ) -> Result<DataCell> {
+        let cell_data = CellData::with_params(cell_type, data, level_mask, references.len() as u8,
+            false, None, None)?;
+        Self::construct_cell(cell_data, references, max_depth)
+    }
+
+    pub fn with_params(
+        references: Vec<Cell>,
+        data: &[u8], // with completion tag!
+        cell_type: CellType,
+        level_mask: u8,
+        hashes: Option<[UInt256; 4]>,
+        depths: Option<[u16; 4]>
+    ) -> Result<DataCell> {
+        assert_eq!(hashes.is_some(), depths.is_some());
+        let store_hashes = hashes.is_some();
+        let cell_data = CellData::with_params(cell_type, data, level_mask, references.len() as u8, 
+            store_hashes, hashes, depths)?;
+        Self::construct_cell(cell_data, references, 0)
+    }
+
+    pub fn with_external_data(
+        references: Vec<Cell>,
+        buffer: &Arc<Vec<u8>>,
+        offset: usize,
+    ) -> Result<DataCell> {
+        let cell_data = CellData::with_external_data(buffer, offset)?;
+        Self::construct_cell(cell_data, references, 0)
+    }
+
+    pub fn with_raw_data(references: Vec<Cell>, data: Vec<u8>) -> Result<DataCell> {
+        let cell_data = CellData::with_raw_data(data)?;
+        Self::construct_cell(cell_data, references, 0)
+    }
+
+    fn construct_cell(
+        cell_data: CellData, 
+        references: Vec<Cell>,
+        max_depth: u16
+    ) -> Result<DataCell> {
         const MAX_56_BITS: u64 = 0x00FF_FFFF_FFFF_FFFFu64;
-        let mut tree_bits_count = cell_data.bit_length as u64;
+        let mut tree_bits_count = cell_data.bit_length() as u64;
         let mut tree_cell_count = 1u64;
         for reference in &references {
             tree_bits_count = tree_bits_count.saturating_add(reference.tree_bits_count());
@@ -817,47 +1331,26 @@ impl DataCell {
         Ok(cell)
     }
 
-    pub fn with_max_depth(
-        references: impl Into<SmallVec<[Cell; 4]>>,
-        data: impl Into<SmallVec<[u8; 128]>>,
-        cell_type: CellType,
-        level_mask: u8,
-        max_depth: u16
-    ) -> Result<DataCell> {
-        let cell_data = CellData::with_params(cell_type, data, level_mask, false, None, None);
-        let references = references.into();
-        Self::construct_cell(cell_data, references, max_depth)
-    }
-
-    pub fn with_params<TRefs>(refs: TRefs, data: impl Into<SmallVec<[u8; 128]>>, cell_type: CellType, level_mask: u8,
-                              hashes: Option<[UInt256; 4]>, depths: Option<[u16; 4]>) -> Result<DataCell>
-        where
-            TRefs: IntoIterator<Item=Cell>
-    {
-        if hashes.is_some() != depths.is_some() {
-            fail!("hashes and depths must be both Some or None")
-        }
-
-        let store_hashes = hashes.is_some();
-        let cell_data = CellData::with_params(cell_type, data, level_mask, store_hashes, hashes, depths);
-        let references = refs.into_iter().collect();
-        Self::construct_cell(cell_data, references, 0)
-    }
-
     fn finalize(&mut self, force: bool, max_depth: u16) -> Result<()> {
-        if !force && self.hashes().is_some() && self.depths().is_some() {
+        if !force && self.store_hashes() {
             return Ok(());
         }
+
+        //let now = std::time::Instant::now();
 
         // Check data size and references count
 
         let bit_len = self.bit_length();
+        let cell_type = self.cell_type();
 
-        match self.cell_type() {
+        // println!("{} {}bits {:03b}", self.cell_type(), bit_len, self.level_mask().mask());
+
+        match cell_type {
             CellType::PrunedBranch => {
                 // type + level_mask + level * (hashes + depths)
-                if bit_len != 8 * (1 + 1 + (self.level() as usize) * (SHA256_SIZE + 2)) {
-                    fail!("fail creating pruned branch cell: {} != {}", bit_len, 8 * (1 + 1 + (self.level() as usize) * (SHA256_SIZE + 2)))
+                let expected = 8 * (1 + 1 + (self.level() as usize) * (SHA256_SIZE + DEPTH_SIZE));
+                if bit_len != expected {
+                    fail!("fail creating pruned branch cell: {} != {}", bit_len, expected)
                 }
                 if !self.references.is_empty() {
                     fail!("fail creating pruned branch cell: references {} != 0", self.references.len())
@@ -865,8 +1358,8 @@ impl DataCell {
                 if self.data()[0] != u8::from(CellType::PrunedBranch) {
                     fail!("fail creating pruned branch cell: data[0] {} != {}", self.data()[0], u8::from(CellType::PrunedBranch))
                 }
-                if self.data()[1] != self.cell_data.level_mask.0 {
-                    fail!("fail creating pruned branch cell: data[1] {} != {}", self.data()[1], self.cell_data.level_mask.0)
+                if self.data()[1] != self.cell_data.level_mask().0 {
+                    fail!("fail creating pruned branch cell: data[1] {} != {}", self.data()[1], self.cell_data.level_mask().0)
                 }
             }
             CellType::MerkleProof => {
@@ -877,7 +1370,6 @@ impl DataCell {
                 if self.references.len() != 1 {
                     fail!("fail creating merkle proof cell: references {} != 1", self.references.len())
                 }
-                // TODO check hashes and depths
             }
             CellType::MerkleUpdate => {
                 // type + 2 * (hash + depth)
@@ -887,7 +1379,6 @@ impl DataCell {
                 if self.references.len() != 2 {
                     fail!("fail creating merkle unpdate cell: references {} != 2", self.references.len())
                 }
-                // TODO check hashes and depths
             }
             CellType::Ordinary => {
                 if bit_len > MAX_DATA_BITS {
@@ -903,8 +1394,8 @@ impl DataCell {
                 }
                 if !self.references.is_empty() {
                     fail!("fail creating libray reference cell: references {} != 0", self.references.len())
+                }
             }
-        }
             CellType::Unknown => {
                 fail!("fail creating unknown cell")
             }
@@ -924,7 +1415,7 @@ impl DataCell {
             CellType::MerkleUpdate => LevelMask::for_merkle_cell(children_mask),
             CellType::Unknown => fail!(ExceptionCode::RangeCheckError)
         };
-        if self.cell_data.level_mask != level_mask {
+        if self.cell_data.level_mask() != level_mask {
             fail!(ExceptionCode::RangeCheckError)
         }
 
@@ -936,39 +1427,37 @@ impl DataCell {
         // pruned cell stores all hashes except representetion in data
         let hashes_count = if is_pruned_cell { 1 } else { self.level() as usize + 1 };
 
-        let mut depths = [0_u16; 4];
-        let mut hashes = [UInt256::MIN; 4];
+        let store_hashes = self.store_hashes();
+        let mut d1d2: [u8; 2] = self.raw_data()?[..2].try_into()?;
+        
         for i in 0..hashes_count {
             let mut hasher = Sha256::new();
 
-            // data
+            // descr bytes
             let level_mask = if is_pruned_cell {
                 self.level_mask()
             } else {
                 LevelMask::with_level(i as u8)
             };
+            d1d2[0] = calc_d1(level_mask, false, cell_type, self.references.len());
+            hasher.update(&d1d2);
 
-            let (d1, d2) = BagOfCells::calculate_descriptor_bytes(
-                bit_len,
-                self.references.len() as u8,
-                level_mask.mask(),
-                self.cell_type() != CellType::Ordinary,
-                false);
-            hasher.update(&[d1, d2]);
-
+            // data
             if i == 0 {
                 let data_size = (bit_len / 8) + if bit_len % 8 != 0 { 1 } else { 0 };
                 hasher.update(&self.data()[..data_size]);
+                //hasher.update(self.cell_data.data());
             } else {
-                hasher.update(hashes[i - 1].as_slice());
+                hasher.update(self.cell_data.raw_hash(i - 1));
             }
 
             // depth
+            let mut depth = 0;
             for child in self.references.iter() {
-                let child_depth = child.depth(if is_merkle_cell { i + 1 } else { i });
-                depths[i] = max(depths[i], child_depth + 1);
-                if ((max_depth != 0) && (depths[i] > max_depth)) || (depths[i] > MAX_DEPTH) {
-                    fail!("fail creating cell: depth {} > {}", depths[i], std::cmp::max(max_depth, MAX_DEPTH))
+                let child_depth = child.depth(i + is_merkle_cell as usize);
+                depth = max(depth, child_depth + 1);
+                if ((max_depth != 0) && (depth > max_depth)) || (depth > MAX_DEPTH) {
+                    fail!("fail creating cell: depth {} > {}", depth, std::cmp::max(max_depth, MAX_DEPTH))
                 }
                 hasher.update(&child_depth.to_be_bytes());
             }
@@ -979,48 +1468,38 @@ impl DataCell {
                 hasher.update(child_hash.as_slice());
             }
 
-            hashes[i] = From::<[u8; 32]>::from(hasher.finalize().into());
-            // debug_assert_ne!(hashes[i], UInt256::DEFAULT_CELL_HASH);
+            let hash = hasher.finalize();
+            if store_hashes {
+                let stored_depth = self.cell_data.depth(i);
+                if depth != stored_depth {
+                    fail!("Calculated depth is not equal stored one ({} != {})", depth, stored_depth);
+                }
+                let stored_hash = self.cell_data.raw_hash(i);
+                if hash.as_slice() != stored_hash {
+                    fail!("Calculated hash is not equal stored one");
+                }
+            } else {
+                self.cell_data.set_hash_depth(i, hash.as_slice(), depth)?;
+            }
         }
 
-        if self.store_hashes() {
-            if Some(&depths) != self.depths() {
-                fail!("store_hashes set and depths do not equal to self.depths")
-            }
-            if Some(&hashes) != self.hashes() {
-                fail!("store_hashes set and hashes do not equal to self.hashes")
-            }
-        } else {
-            self.set_hashes(Some(hashes));
-            self.set_depths(Some(depths));
-        }
+        //FINALIZATION_NANOS.fetch_add(now.elapsed().as_nanos() as u64, Ordering::Relaxed);
+
         Ok(())
     }
 
     pub fn cell_data(&self) -> &CellData {
         &self.cell_data
     }
-
-    fn hashes(&self) -> Option<&[UInt256; 4]> {
-        self.cell_data.hashes()
-    }
-
-    fn set_hashes(&mut self, hashes: Option<[UInt256; 4]>) {
-        self.cell_data.set_hashes(hashes)
-    }
-
-    fn depths(&self) -> Option<&[u16; 4]> {
-        self.cell_data.depths()
-    }
-
-    fn set_depths(&mut self, depths: Option<[u16; 4]>) {
-        self.cell_data.set_depths(depths)
-    }
 }
 
 impl CellImpl for DataCell {
     fn data(&self) -> &[u8] {
         self.cell_data.data()
+    }
+
+    fn raw_data(&self) -> Result<&[u8]> {
+        Ok(self.cell_data.raw_data())
     }
 
     fn cell_data(&self) -> &CellData {
@@ -1100,6 +1579,13 @@ impl CellImpl for UsageCell {
         self.cell.data()
     }
 
+    fn raw_data(&self) -> Result<&[u8]> {
+        if !self.visit_on_load {
+            self.visit();
+        }
+        self.cell.raw_data()
+    }
+
     fn cell_data(&self) -> &CellData {
         if !self.visit_on_load {
             self.visit();
@@ -1169,6 +1655,10 @@ impl VirtualCell {
 impl CellImpl for VirtualCell {
     fn data(&self) -> &[u8] {
         self.cell.data()
+    }
+
+    fn raw_data(&self) -> Result<&[u8]> {
+        fail!("Virtual cell doesn't support raw_data()");
     }
 
     fn cell_data(&self) -> &CellData {
@@ -1276,7 +1766,6 @@ pub use self::builder::*;
 mod builder_operations;
 
 pub use self::builder_operations::*;
-use std::io::{Write, Read, ErrorKind};
 use smallvec::SmallVec;
 
 pub(crate) fn to_hex_string(data: &[u8], len: usize, lower: bool) -> String {
