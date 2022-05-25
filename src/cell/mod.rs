@@ -914,11 +914,14 @@ fn check_cell_buf(buf: &[u8], unbounded: bool) -> Result<()> {
         }
 
         let cell_data = cell_data(buf);
-        let data_bit_len = find_tag(cell_data);
+        let data_bit_len = bit_len(buf);
         let expected_len = data_bit_len / 8 + (data_bit_len % 8 != 0) as usize;
         if cell_data.len() != expected_len {
-            log::warn!("Data len wrote in description byte 2 ({} byte) is not correspond real length \
-                calculated by tag ({} byte, {} bit)", cell_data.len(), expected_len, data_bit_len);
+            log::warn!(
+                "Data len wrote in description byte 2 ({} bytes) does not correspond to real length \
+                calculated by tag ({} bytes, {} bits, data: {})",
+                cell_data.len(), expected_len, data_bit_len, hex::encode(cell_data)
+            );
         }
     }
 
