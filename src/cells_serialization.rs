@@ -43,9 +43,8 @@ pub enum BocSerialiseMode {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct BagOfCells {
-    absent: HashSet<UInt256>,
     roots_indexes_rev: Vec<usize>,
     absent_count: usize,
     cells: HashMap<UInt256, (Cell, u32)>, // cell, reversed index (from end)
@@ -64,6 +63,13 @@ impl BagOfCells {
     }
     
     pub fn with_roots_and_absent(root_cells: Vec<&Cell>, absent_cells: Vec<&Cell>) -> Self {
+        // Only one case Self::with_params returns error is abort. 
+        // But abort flag is always false here.
+        Self::with_params(root_cells, absent_cells, &|| false)
+            .expect("Unexpected erorr in BagOfCells::with_roots_and_absent")
+    }
+
+    pub fn with_params(root_cells: Vec<&Cell>, absent_cells: Vec<&Cell>, abort: &dyn Fn() -> bool) -> Result<Self> {
         let mut cells = HashMap::<UInt256, (Cell, u32)>::new();
         let mut sorted_rev = Vec::<UInt256>::new();
         let mut absent_cells_hashes = HashSet::<UInt256>::new();
@@ -83,21 +89,21 @@ impl BagOfCells {
                 &mut sorted_rev, 
                 &mut total_data_size,
                 &mut total_references,
-            );
+                abort,
+            )?;
             roots_indexes_rev.push(sorted_rev.len() - 1); // root must be added into `sorted_rev` back
         }
 
         // roots must be firtst
         // TODO: due to real ton sorces it is not necceary to write roots first
-        BagOfCells {
-            absent: absent_cells_hashes,
+        Ok(BagOfCells {
             roots_indexes_rev,
             absent_count: absent_cells.len(),
             cells,
             sorted_rev,
             total_data_size,
             total_references,
-        }
+        })
     }
 
     pub fn cells(&self) -> &HashMap<UInt256, (Cell, u32)> {
@@ -143,8 +149,24 @@ impl BagOfCells {
             None)
     }
 
-    pub fn write_to_ex<T: Write>(&self, dest: &mut T, mode: BocSerialiseMode,
-        custom_ref_size: Option<usize>, custom_offset_size: Option<usize>) -> Result<()> {
+    pub fn write_to_ex<T: Write>(
+        &self,
+        dest: &mut T,
+        mode: BocSerialiseMode,
+        custom_ref_size: Option<usize>,
+        custom_offset_size: Option<usize>,
+    ) -> Result<()> {
+        self.write_to_with_abort(dest, mode, custom_ref_size, custom_offset_size, &|| false)
+    }
+
+    pub fn write_to_with_abort<T: Write>(
+        &self,
+        dest: &mut T,
+        mode: BocSerialiseMode,
+        custom_ref_size: Option<usize>,
+        custom_offset_size: Option<usize>,
+        abort: &dyn Fn() -> bool
+    ) -> Result<()> {
         
         let dest = &mut IoCrcFilter::new(dest);
 
@@ -219,6 +241,7 @@ impl BagOfCells {
         if include_root_list {
             // Write root's indexes 
             for index in self.roots_indexes_rev.iter() {
+                Self::check_abort(abort)?;
                 dest.write_all(&((total_cells - *index - 1) as u64).to_be_bytes()[(8-ref_size)..8])?;
             }
         }
@@ -227,6 +250,7 @@ impl BagOfCells {
         if include_index { 
             let mut total_size = 0;
             for cell_hash in self.sorted_rev.iter().rev() {
+                Self::check_abort(abort)?;
                 let cell = &self.cells[cell_hash].0;
                 total_size += full_len(cell.raw_data()?) + ref_size * cell.references_count();
                 let for_write = 
@@ -242,6 +266,7 @@ impl BagOfCells {
 
         // Cells
         for (cell_index, cell_hash) in self.sorted_rev.iter().rev().enumerate() {
+            Self::check_abort(abort)?;
             if let Some((cell, _)) = &self.cells.get(cell_hash) {
                 dest.write_all(cell.raw_data()?)?;
                 
@@ -265,6 +290,13 @@ impl BagOfCells {
         Ok(())
     }
 
+    fn check_abort(abort: &dyn Fn() -> bool) -> Result<()> {
+        if abort() {
+            fail!("Operation was aborted");
+        }
+        Ok(())
+    }
+
     fn traverse(
         cell: &Cell,
         absent_cells: &HashSet<UInt256>,
@@ -272,7 +304,9 @@ impl BagOfCells {
         sorted_rev: &mut Vec<UInt256>, 
         total_data_size: &mut usize,
         total_references: &mut usize,
-    ) {
+        abort: &dyn Fn() -> bool,
+    ) -> Result<()> {
+        Self::check_abort(abort)?;
         let hash = cell.repr_hash();
         if !cells.contains_key(&hash) {
             let absent = absent_cells.contains(&hash);
@@ -280,13 +314,14 @@ impl BagOfCells {
                 for i in 0..cell.references_count() {
                     let child = cell.reference(i).unwrap();
                     Self::traverse(&child, absent_cells, cells, sorted_rev, 
-                        total_data_size, total_references);
+                        total_data_size, total_references, abort)?;
                 }
             }
             cells.insert(hash.clone(), (cell.clone(), sorted_rev.len() as u32));
             sorted_rev.push(hash);
             Self::update_counters(cell, absent, total_data_size, total_references);
         }
+        Ok(())
     }
 
     fn update_counters(cell: &Cell, absent: bool, total_data_size: &mut usize, total_references: &mut usize) {
@@ -368,12 +403,22 @@ pub fn serialize_toc(cell: &Cell) -> Result<Vec<u8>> {
 
 // Absent cells is deserialized into cell with hash. Caller have to know about the cells and process it by itself.
 // Returns vector with root cells
-pub fn deserialize_cells_tree<T>(src: &mut T) -> Result<Vec<Cell>> where T: Read + Seek {
+pub fn deserialize_cells_tree<T: Read + Seek>(
+    src: &mut T
+) -> Result<Vec<Cell>> {
     deserialize_cells_tree_ex(src).map(|(v, _, _, _)| v)
 }
 
-pub fn deserialize_cells_tree_ex<T>(src: &mut T) -> Result<(Vec<Cell>, BocSerialiseMode, usize, usize)>
-    where T: Read + Seek {
+pub fn deserialize_cells_tree_ex<T: Read + Seek>(
+    src: &mut T
+) -> Result<(Vec<Cell>, BocSerialiseMode, usize, usize)> {
+    deserialize_cells_tree_with_abort(src, &|| false)
+}
+
+pub fn deserialize_cells_tree_with_abort<T: Read + Seek>(
+    src: &mut T,
+    abort: &dyn Fn() -> bool,
+) -> Result<(Vec<Cell>, BocSerialiseMode, usize, usize)> {
 
     #[cfg(not(target_family = "wasm"))]
     let now = std::time::Instant::now();
@@ -385,8 +430,11 @@ pub fn deserialize_cells_tree_ex<T>(src: &mut T) -> Result<(Vec<Cell>, BocSerial
     let mut src = IoCrcFilter::new(src);
 
     let header = deserialize_cells_tree_header(&mut src)?;
+    let header_len = src.stream_position()? - position;
 
-    precheck_cells_tree_len(&header, src.stream_position()?, src_full_len, true)?;
+    BagOfCells::check_abort(abort)?;
+
+    precheck_cells_tree_len(&header, header_len, src_full_len, true)?;
 
     // Skip index
     if header.index_included {
@@ -399,6 +447,7 @@ pub fn deserialize_cells_tree_ex<T>(src: &mut T) -> Result<(Vec<Cell>, BocSerial
     let now1 = std::time::Instant::now();
     let mut raw_cells = HashMap::new();
     for cell_index in 0..header.cells_count {
+        BagOfCells::check_abort(abort)?;
         raw_cells.insert(cell_index, read_raw_cell(&mut src, header.ref_size, cell_index, header.cells_count)?);
     }
     #[cfg(not(target_family = "wasm"))]
@@ -409,6 +458,7 @@ pub fn deserialize_cells_tree_ex<T>(src: &mut T) -> Result<(Vec<Cell>, BocSerial
     let now1 = std::time::Instant::now();
     let mut done_cells = HashMap::<u32, Cell>::new();
     for cell_index in (0..header.cells_count).rev() {
+        BagOfCells::check_abort(abort)?;
         let raw_cell = raw_cells.remove(&cell_index).ok_or_else(|| error!("raw_cells is corrupted!"))?;
         let mut refs = vec!();
         for i in 0..cell::refs_count(&raw_cell.data) {
@@ -431,6 +481,7 @@ pub fn deserialize_cells_tree_ex<T>(src: &mut T) -> Result<(Vec<Cell>, BocSerial
     };
     let mut roots = Vec::with_capacity(roots_indexes.len());
     for i in roots_indexes {
+        BagOfCells::check_abort(abort)?;
         roots.push(
             done_cells.remove(i).ok_or_else(|| error!("done_cells is corrupted!"))?
         );
@@ -468,7 +519,16 @@ pub fn deserialize_cells_tree_ex<T>(src: &mut T) -> Result<(Vec<Cell>, BocSerial
     Ok((roots, header.mode, header.ref_size, header.offset_size))
 }
 
-pub fn deserialize_cells_tree_inmem(data: Arc<Vec<u8>>) -> Result<(Vec<Cell>, BocSerialiseMode, usize, usize)> {
+pub fn deserialize_cells_tree_inmem(
+    data: Arc<Vec<u8>>
+) -> Result<(Vec<Cell>, BocSerialiseMode, usize, usize)> {
+    deserialize_cells_tree_inmem_with_abort(data, &|| false)
+}
+
+pub fn deserialize_cells_tree_inmem_with_abort(
+    data: Arc<Vec<u8>>,
+    abort: &dyn Fn() -> bool
+) -> Result<(Vec<Cell>, BocSerialiseMode, usize, usize)> {
 
     #[cfg(not(target_family = "wasm"))]
     let now = std::time::Instant::now();
@@ -494,6 +554,7 @@ pub fn deserialize_cells_tree_inmem(data: Arc<Vec<u8>>) -> Result<(Vec<Cell>, Bo
     if !header.index_included {
         index2 = Vec::with_capacity(header.cells_count);
         for _ in 0_usize..header.cells_count {
+            BagOfCells::check_abort(abort)?;
             index2.push(src.position() as u32);
             skip_cell(&mut src, header.ref_size)?;
         }
@@ -511,6 +572,7 @@ pub fn deserialize_cells_tree_inmem(data: Arc<Vec<u8>>) -> Result<(Vec<Cell>, Bo
     let cells_start = src.position() as usize + header.cells_count * header.offset_size;
     let mut done_cells = HashMap::<u32, Cell>::new();
     for cell_index in (0..header.cells_count).rev() {
+        BagOfCells::check_abort(abort)?;
 
         let offset = if header.index_included {
             let mut offset = cells_start as usize;
@@ -550,6 +612,7 @@ pub fn deserialize_cells_tree_inmem(data: Arc<Vec<u8>>) -> Result<(Vec<Cell>, Bo
     let mut roots = Vec::with_capacity(header.roots_count);
     if header.magic == BOC_GENERIC_TAG {
         for i in header.roots_indexes {
+            BagOfCells::check_abort(abort)?;
             roots.push(done_cells.get(&i).unwrap().clone());
         }
     } else {
