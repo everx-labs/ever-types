@@ -112,7 +112,6 @@ impl UInt256 {
     // TODO: usage should be changed to str::FromStr
     // #[deprecated]
     #[allow(clippy::should_implement_trait)]
-    #[cfg(not(test))]
     pub fn from_str(value: &str) -> Result<Self> { FromStr::from_str(value) }
 
     pub fn calc_file_hash(bytes: &[u8]) -> Self { Self::calc_sha256(bytes) }
