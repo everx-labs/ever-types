@@ -538,14 +538,6 @@ pub fn deserialize_cells_tree_inmem_with_abort(
 
     precheck_cells_tree_len(&header, src.position(), data.len() as u64, false)?;
 
-    let mut total_len = src.position() as usize + header.tot_cells_size;
-    if header.index_included {
-        total_len += header.cells_count * header.offset_size;
-    }
-    if data.len() != total_len {
-        fail!("Given data length ({}) is not correspond calculated one ({})", data.len(), total_len);
-    }
-
     // Index processing - read existing index or traverse all vector to create own index2
     #[cfg(not(target_family = "wasm"))]
     let now1 = std::time::Instant::now();
@@ -623,8 +615,9 @@ pub fn deserialize_cells_tree_inmem_with_abort(
     let now1 = std::time::Instant::now();
     if header.has_crc {
         let mut hasher = crc32::Digest::new(crc32::CASTAGNOLI);
-        hasher.write(&data[..]);
+        hasher.write(&data[..data.len() - 4]);
         let crc = hasher.sum32();
+        src.set_position(data.len() as u64 - 4);
         let read_crc = src.read_le_u32()?;
         if read_crc != crc {
             fail!("crc not the same, values: {}, {}", read_crc, crc)

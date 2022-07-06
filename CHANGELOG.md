@@ -1,11 +1,16 @@
-# Changelog
+# Release Notes
 
 All notable changes to this project will be documented in this file.
 
-## Version: 1.11.2
+## Version: 1.11.3
 
 ### New
- - Boc ser/deserialisation with safe aborting (#155)
+ - Update
 
 
+## Version: 1.11.3
 
+### Bugfixes
+
+- Fixed bug in 'deserialize_cells_tree_inmem_with_abort' - deleted unneded check with error (all needed checks performs in 'precheck_cells_tree_len'). Error appeared when BOC contained CRC.
+- Fixed bug in 'deserialize_cells_tree_inmem_with_abort' - CRC calculated using wrong offsets.
