@@ -177,6 +177,9 @@ pub trait CellImpl: Sync + Send {
     fn bit_length(&self) -> usize;
     fn references_count(&self) -> usize;
     fn reference(&self, index: usize) -> Result<Cell>;
+    fn reference_repr_hash(&self, index: usize) -> Result<UInt256> {
+        Ok(self.reference(index)?.hash(MAX_LEVEL))
+    }
     fn cell_type(&self) -> CellType;
     fn level_mask(&self) -> LevelMask;
     fn hash(&self, index: usize) -> UInt256;
@@ -253,6 +256,10 @@ impl Cell {
 
     pub fn reference(&self, index: usize) -> Result<Cell> {
         self.0.reference(index)
+    }
+
+    pub fn reference_repr_hash(&self, index: usize) -> Result<UInt256> {
+        self.0.reference_repr_hash(index)
     }
 
     // TODO: make as simple clone
@@ -914,6 +921,9 @@ fn check_cell_buf(buf: &[u8], unbounded: bool) -> Result<()> {
         }
 
         let cell_data = cell_data(buf);
+        if exotic(buf) && cell_data.len() == 0 {
+            fail!("exotic cells must have non zero data length")
+        }
         let data_bit_len = bit_len(buf);
         let expected_len = data_bit_len / 8 + (data_bit_len % 8 != 0) as usize;
         if cell_data.len() != expected_len {
