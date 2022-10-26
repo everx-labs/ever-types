@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version: 1.11.4
+
+### New
+ - Update
+
+
 ## Version: 1.11.3
 
 ### Bugfixes
