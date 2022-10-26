@@ -1,22 +1,6 @@
-#
-# Copyright (C) 2019-2021 TON Labs. All Rights Reserved.
-#
-# Licensed under the SOFTWARE EVALUATION License (the "License"); you may not use
-# this file except in compliance with the License.  You may obtain a copy of the
-# License at:
-#
-# https://www.ton.dev/licenses
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific TON DEV software governing permissions and limitations
-# under the License.
-#
-
 [package]
-edition = '2018'
 build = 'build.rs'
+edition = '2018'
 name = 'ton_types'
 version = '1.11.4'
 
@@ -25,9 +9,6 @@ name = 'test_cells'
 path = 'bin/test_cells.rs'
 
 [dependencies]
-lockfree = { git = 'https://github.com/tonlabs/lockfree.git' }
-
-# External
 base64 = '0.13'
 crc = '1.8.1'
 failure = '0.1.6'
@@ -39,4 +20,6 @@ num-derive = '0.3'
 num-traits = '0.2'
 rand = '0.8.3'
 sha2 = '0.9'
+lockfree = { git = 'https://github.com/tonlabs/lockfree.git' }
 smallvec = { features = [ 'const_generics', 'union', 'write' ], version = '1.6.1' }
+
