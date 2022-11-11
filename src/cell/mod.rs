@@ -555,7 +555,7 @@ impl fmt::Binary for Cell {
     }
 }
 
-/// Calculates data's length in bits with respect to completion tag
+/// Calculates data's lengt in bits with respect to completion tag
 pub fn find_tag(bitsting: &[u8]) -> usize {
     let mut length = bitsting.len() * 8;
     for x in bitsting.iter().rev() {
@@ -1750,7 +1750,7 @@ impl UsageTree {
     }
 
     pub fn root_slice(&self) -> SliceData {
-        SliceData::load_cell(&self.root).unwrap()
+        SliceData::from(self.root.clone())
     }
 
     pub fn root_cell(&self) -> Cell {

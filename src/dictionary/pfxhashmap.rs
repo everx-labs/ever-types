@@ -90,8 +90,8 @@ impl PfxHashmapE {
     /// true if key is prefix of any item in PfxHashmap
     pub fn is_prefix(&self, mut key: SliceData) -> Result<bool> {
         let mut bit_len = self.bit_len;
-        let mut cursor = match self.data() {
-            Some(root) if !key.is_empty() => SliceData::load_cell(root)?,
+        let mut cursor = match self.data().cloned() {
+            Some(root) if !key.is_empty() => SliceData::from(root),
             _ => return Ok(false)
         };
         let mut label = cursor.get_label(bit_len)?;
@@ -111,7 +111,7 @@ impl PfxHashmapE {
                 debug_assert!(false);
                 return Ok(false) // problem
             }
-            cursor = SliceData::load_cell(&cursor.reference(next_index)?)?;
+            cursor = SliceData::from(cursor.reference(next_index)?);
             bit_len -= label.remaining_bits() + 1;
             label = cursor.get_label(bit_len)?;
         }
@@ -132,19 +132,19 @@ impl PfxHashmapE {
                     key.shrink_data(..0);
                 }
                 (_, None, Some(remainder)) => key = remainder, // usual case
-                (_, _, None) => return Ok((SliceData::load_builder(path)?, None, SliceData::default())), // key is prefix
-                (_, Some(_), Some(remainder)) => return Ok((SliceData::load_builder(path)?, None, remainder))
+                (_, _, None) => return Ok((path.into_cell()?.into(), None, SliceData::default())), // key is prefix
+                (_, Some(_), Some(remainder)) => return Ok((path.into_cell()?.into(), None, remainder))
             }
             if Self::is_leaf(&mut cursor) {
-                return Ok((SliceData::load_builder(path)?, Some(cursor), key))
+                return Ok((path.into_cell()?.into(), Some(cursor), key))
             } else if key.is_empty() {
-                return Ok((SliceData::load_builder(path)?, None, key))
+                return Ok((path.into_cell()?.into(), None, key))
             }
             let next_index = key.get_next_bit_int()?;
             if next_index >= cursor.remaining_references()
                 || bit_len < label.remaining_bits() + 1 {
                 debug_assert!(false);
-                return Ok((SliceData::load_builder(path)?, None, key)) // problem
+                return Ok((path.into_cell()?.into(), None, key)) // problem
             }
             path.append_bit_bool(next_index == 1)?;
             cursor = gas_consumer.load_cell(cursor.reference(next_index)?)?;
@@ -155,8 +155,8 @@ impl PfxHashmapE {
     #[allow(dead_code)]
     pub fn get_leaf_by_prefix(&self, mut key: SliceData) -> Result<(SliceData, Option<SliceData>, SliceData)> {
         let mut bit_len = self.bit_len;
-        let mut cursor = match self.data() {
-            Some(root) if !key.is_empty() => SliceData::load_cell(root)?,
+        let mut cursor = match self.data().cloned() {
+            Some(root) if !key.is_empty() => SliceData::from(root),
             _ => return Ok((SliceData::default(), None, key))
         };
         let mut path = BuilderData::default();
@@ -169,35 +169,35 @@ impl PfxHashmapE {
                 }
                 (_, None, Some(remainder)) => key = remainder, // usual case
                 (_, _, None) => break, // key is prefix
-                (_, Some(_), Some(remainder)) => return Ok((SliceData::load_builder(path)?, None, remainder))
+                (_, Some(_), Some(remainder)) => return Ok((path.into_cell()?.into(), None, remainder))
             }
             if Self::is_leaf(&mut cursor) {
-                return Ok((SliceData::load_builder(path)?, Some(cursor), key))
+                return Ok((path.into_cell()?.into(), Some(cursor), key))
             }
             let next_index = key.get_next_bit_int()?;
             if next_index >= cursor.remaining_references()
                 || bit_len < label.remaining_bits() + 1 {
                 debug_assert!(false);
-                return Ok((SliceData::load_builder(path)?, None, key)) // problem
+                return Ok((path.into_cell()?.into(), None, key)) // problem
             }
             path.append_bit_bool(next_index == 1)?;
-            cursor = SliceData::load_cell(&cursor.reference(next_index)?)?;
+            cursor = SliceData::from(cursor.reference(next_index)?);
             bit_len -= label.remaining_bits() + 1;
             label = cursor.get_label(bit_len)?;
         }
         key = SliceData::default();
         loop {
             if Self::is_leaf(&mut cursor) {
-                return Ok((SliceData::load_builder(path)?, Some(cursor), key))
+                return Ok((path.into_cell()?.into(), Some(cursor), key))
             }
             let next_index = 0;
             if next_index >= cursor.remaining_references() {
-                return Ok((SliceData::load_builder(path)?, None, key)) // problem
+                return Ok((path.into_cell()?.into(), None, key)) // problem
             }
             path.append_bit_bool(next_index == 1)?;
-            cursor = SliceData::load_cell(&cursor.reference(next_index)?)?;
+            cursor = SliceData::from(cursor.reference(next_index)?);
             if bit_len < label.remaining_bits() + 1 {
-                return Ok((SliceData::load_builder(path)?, None, key)) // problem
+                return Ok((path.into_cell()?.into(), None, key)) // problem
             }
             bit_len -= label.remaining_bits() + 1;
             label = cursor.get_label(bit_len)?;
@@ -243,7 +243,7 @@ impl HashmapType for PfxHashmapE {
         remainder.checked_append_reference(left)?;
         remainder.checked_append_reference(right)?;
         builder.append_builder(&remainder)?;
-        Ok((builder, SliceData::load_builder(remainder)?))
+        Ok((builder, remainder.into_cell()?.into()))
     }
     fn make_leaf(key: &SliceData, bit_len: usize, value: &SliceData) -> Result<BuilderData> {
         let mut builder = hm_label(key, bit_len)?;

@@ -162,8 +162,8 @@ impl LabelReader {
             already_read: false
         }
     }
-    pub fn with_cell(cursor: &Cell) -> Result<Self> {
-        Ok(Self::new(SliceData::load_cell(cursor)?))
+    pub fn with_cell(cursor: &Cell) -> Self {
+        Self::new(cursor.into())
     }
     pub fn next_reader<T: HashmapType + ?Sized>(&mut self, index: usize, gas_consumer: &mut dyn GasConsumer) -> Result<Self> {
         if !self.is_fork::<T>()? {
@@ -215,7 +215,7 @@ impl LabelReader {
         } else if !self.cursor.get_next_bit()? {
             self.get_label_long(&mut max)
         } else {
-            SliceData::load_builder(self.get_label_same(&mut max, BuilderData::default())?)
+            Ok(self.get_label_same(&mut max, BuilderData::default())?.into_cell()?.into())
         }
     }
     pub fn skip_label(&mut self, max: &mut usize) -> Result<()> {
@@ -430,7 +430,7 @@ pub trait HashmapType {
         label.append_bit_bool(!is_left)?;
         label = next.get_label_raw(&mut next_bit_len, label)?;
         let is_leaf = Self::is_leaf(&mut next);
-        Self::make_cell_with_label_and_data(SliceData::load_builder(label)?, bit_len, is_leaf, &next)
+        Self::make_cell_with_label_and_data(label.into_cell()?.into(), bit_len, is_leaf, &next)
     }
     fn make_fork(key: &SliceData, bit_len: usize, mut left: Cell, mut right: Cell, swap: bool) -> Result<(BuilderData, SliceData)> {
         let mut builder = hm_label(key, bit_len)?;
@@ -441,7 +441,7 @@ pub trait HashmapType {
         remainder.checked_append_reference(left)?;
         remainder.checked_append_reference(right)?;
         builder.append_builder(&remainder)?;
-        Ok((builder, SliceData::load_builder(remainder)?))
+        Ok((builder, remainder.into_cell()?.into()))
     }
     fn make_leaf(key: &SliceData, bit_len: usize, value: &SliceData) -> Result<BuilderData> {
         let mut builder = hm_label(key, bit_len)?;
@@ -543,10 +543,10 @@ pub trait HashmapType {
     where F: FnMut(SliceData, SliceData) -> Result<bool> {
         if let Some(root) = self.data() {
             iterate_internal::<Self, _>(
-                LabelReader::with_cell(root)?,
+                LabelReader::with_cell(root),
                 BuilderData::default(),
                 self.bit_len(),
-                &mut |k, v| p(SliceData::load_builder(k)?, v))
+                &mut |k, v| p(k.into_cell()?.into(), v))
         } else {
             Ok(true)
         }
@@ -557,7 +557,7 @@ pub trait HashmapType {
         match self.data() {
             Some(root) => {
                 let mut len = 0;
-                let cursor = LabelReader::with_cell(root)?;
+                let cursor = LabelReader::with_cell(root);
                 count_internal::<Self>(cursor, self.bit_len(), &mut len, std::usize::MAX)?;
                 Ok(len)
             }
@@ -569,7 +569,7 @@ pub trait HashmapType {
         match self.data() {
             Some(root) => {
                 let mut len = 0;
-                let cursor = LabelReader::with_cell(root)?;
+                let cursor = LabelReader::with_cell(root);
                 count_internal::<Self>(cursor, self.bit_len(), &mut len, max)?;
                 Ok(len)
             }
@@ -580,7 +580,7 @@ pub trait HashmapType {
     fn is_single(&self) -> Result<Option<(BuilderData, SliceData)>> {
         if let Some(root) = self.data() {
             let mut bit_len = self.bit_len();
-            let mut cursor = LabelReader::with_cell(root)?;
+            let mut cursor = LabelReader::with_cell(root);
             let key = cursor.get_label_raw(&mut bit_len, BuilderData::default())?;
             if bit_len == 0 {
                 return Ok(Some((key, cursor.remainder()?)))
@@ -595,7 +595,7 @@ pub trait HashmapType {
             Some(data) => data,
             _ => return Ok((None, None))
         };
-        let mut cursor = SliceData::load_cell(data)?;
+        let mut cursor = SliceData::from(data.clone());
         let label = cursor.get_label(bit_len)?;
         let (left, right) = match SliceData::common_prefix(&label, key) {
             // normal case label == key
@@ -611,19 +611,19 @@ pub trait HashmapType {
             // wrong hashmap tree
             _ => fail!("split fail: root label: x{:x} and key: x{:x}", label, key),
         };
-        cursor = SliceData::load_cell(&left)?;
+        cursor = SliceData::from(left);
         let label = cursor.get_label(bit_len)?;
         let mut builder = BuilderData::from_slice(key);
         builder.append_bit_zero()?;
         builder.append_bytestring(&label)?;
-        let left = Self::make_cell_with_label_and_data(SliceData::load_builder(builder)?, self.bit_len(), false, &cursor)?;
+        let left = Self::make_cell_with_label_and_data(builder.into_cell()?.into(), self.bit_len(), false, &cursor)?;
 
-        cursor = SliceData::load_cell(&right)?;
+        cursor = SliceData::from(right);
         let label = cursor.get_label(bit_len)?;
         let mut builder = BuilderData::from_slice(key);
         builder.append_bit_one()?;
         builder.append_bytestring(&label)?;
-        let right = Self::make_cell_with_label_and_data(SliceData::load_builder(builder)?, self.bit_len(), false, &cursor)?;
+        let right = Self::make_cell_with_label_and_data(builder.into_cell()?.into(), self.bit_len(), false, &cursor)?;
 
         Ok((Some(left.into_cell()?), Some(right.into_cell()?)))
     }
@@ -634,14 +634,14 @@ pub trait HashmapType {
             return Ok(()) // fail!("data in hashmaps do not correspond each other or key too long")
         }
         let mut cursor = match self.data() {
-            Some(data) => SliceData::load_cell(data)?,
+            Some(data) => SliceData::from(data),
             None => {
                 *self.data_mut() = other.data().cloned();
                 return Ok(())
             }
         };
         let mut other = match other.data() {
-            Some(data) => SliceData::load_cell(data)?,
+            Some(data) => SliceData::from(data),
             None => return Ok(())
         };
         let label1 = cursor.get_label(bit_len)?;
@@ -706,7 +706,7 @@ pub trait HashmapType {
 }
 
 fn dict_combine_with_cell<T: HashmapType + ?Sized>(cell1: &mut Cell, cell2: Cell, bit_len: usize) -> Result<bool> {
-    let mut cursor2 = SliceData::load_cell(&cell2)?;
+    let mut cursor2 = SliceData::from(cell2);
     let label2 = cursor2.get_label(bit_len)?;
     let bit_len2 = bit_len.checked_sub(label2.remaining_bits()).ok_or(ExceptionCode::CellUnderflow)?;
     dict_combine_with::<T>(cell1, bit_len, cursor2, label2, bit_len2)
@@ -716,7 +716,7 @@ fn dict_combine_with<T: HashmapType + ?Sized>(
     cell1: &mut Cell, bit_len: usize,
     mut cursor2: SliceData, label2: SliceData, bit_len2: usize
 ) -> Result<bool> {
-    let mut cursor1 = SliceData::load_cell(cell1)?;
+    let mut cursor1 = SliceData::from(cell1.clone());
     let label1 = cursor1.get_label(bit_len)?;
     let bit_len1 = bit_len.checked_sub(label1.remaining_bits()).ok_or(ExceptionCode::CellUnderflow)?;
     match SliceData::common_prefix(&label1, &label2) {
@@ -790,10 +790,9 @@ where
     if bit_len_1 == 0 && bit_len_2 == 0 { // 1 and 2 leaves reached
         if key1 == key2 {
             if cursor_1 != cursor_2 {
-                return func(SliceData::load_builder(key1)?, Some(cursor_1.remainder()?), Some(cursor_2.remainder()?))
+                return func(key1.into_cell()?.into(), Some(cursor_1.remainder()?), Some(cursor_2.remainder()?))
             }
-        } else if !func(SliceData::load_builder(key1)?, Some(cursor_1.remainder()?), None)?
-            || !func(SliceData::load_builder(key2)?, None, Some(cursor_2.remainder()?))? {
+        } else if !func(key1.into_cell()?.into(), Some(cursor_1.remainder()?), None)? || !func(key2.into_cell()?.into(), None, Some(cursor_2.remainder()?))? {
             return Ok(false)
         }
     } else if bit_len_1 == 0 { // leaf of 1 is reached
@@ -804,15 +803,15 @@ where
             key2,
             bit_len_2,
             &mut |key, cursor| if key1 != key {
-                func(SliceData::load_builder(key)?, None, Some(cursor))
+                func(key.into_cell()?.into(), None, Some(cursor))
             } else { 
                 chk = true; 
                 match cursor == cursor_1 {
                     true => Ok(true),
-                    false => func(SliceData::load_builder(key)?, Some(cursor_1.clone()), Some(cursor))
+                    false => func(key.into_cell()?.into(), Some(cursor_1.clone()), Some(cursor))
                 }
             }
-        )? || (!chk && !func(SliceData::load_builder(key1)?, Some(cursor_1.clone()), None)?) {
+        )? || (!chk && !func(key1.into_cell()?.into(), Some(cursor_1.clone()), None)?) {
             return Ok(false)
         }
     } else { // leaf of 2 is reached
@@ -824,15 +823,15 @@ where
             key1,
             bit_len_1,
             &mut |key, cursor| if key2 != key {
-                func(SliceData::load_builder(key)?, Some(cursor), None)
+                func(key.into_cell()?.into(), Some(cursor), None)
             } else {
                 chk = true;
                 match cursor == cursor_2 {
                     true => Ok(true),
-                    false => func(SliceData::load_builder(key)?, Some(cursor), Some(cursor_2.clone()))
+                    false => func(key.into_cell()?.into(), Some(cursor), Some(cursor_2.clone()))
                 }
             }
-        )? || (!chk && !func(SliceData::load_builder(key2)?, None, Some(cursor_2.clone()))?) {
+        )? || (!chk && !func(key2.into_cell()?.into(), None, Some(cursor_2.clone()))?) {
             return Ok(false)
         }
     }
@@ -853,19 +852,19 @@ where
         (Some(cell_1), Some(cell_2)) => if cell_1 == cell_2 {
             return Ok(true)
         } else {
-            (LabelReader::new(SliceData::load_cell(&cell_1)?), LabelReader::new(SliceData::load_cell(&cell_2)?))
+            (LabelReader::new(SliceData::from(cell_1)), LabelReader::new(SliceData::from(cell_2)))
         }
         (Some(cell), None) => return iterate_internal::<T, _>( // only 1 leaves
-            LabelReader::with_cell(&cell)?,
+            LabelReader::with_cell(&cell),
             key,
             bit_len_1,
-            &mut |key, cursor| func(SliceData::load_builder(key)?, Some(cursor), None)
+            &mut |key, cursor| func(key.into_cell()?.into(), Some(cursor), None)
         ),
         (None, Some(cell)) => return iterate_internal::<T, _>( // only 2 leaves
-            LabelReader::with_cell(&cell)?,
+            LabelReader::with_cell(&cell),
             key,
             bit_len_2,
-            &mut |key, cursor| func(SliceData::load_builder(key)?, None, Some(cursor))
+            &mut |key, cursor| func(key.into_cell()?.into(), None, Some(cursor))
         ),
         _ => return Ok(true)
     };
@@ -878,7 +877,7 @@ where
             if cursor_1 == cursor_2 {
                 return Ok(true)
             } else if bit_len_1 == 0 { // same 1 and 2 leaves reached
-                return func(SliceData::load_builder(key1)?, Some(cursor_1.remainder()?), Some(cursor_2.remainder()?))
+                return func(key1.into_cell()?.into(), Some(cursor_1.remainder()?), Some(cursor_2.remainder()?))
             } else { // same branch reached - continue scan_diff as from start
                 debug_assert_eq!(bit_len_1, bit_len_2);
                 bit_len_1 -= 1;
@@ -1018,7 +1017,7 @@ fn put_to_fork_with_mode<T: HashmapType + ?Sized>(
             builder.checked_append_reference(slice.checked_drain_reference()?)?;
         }
     }
-    *slice = SliceData::load_builder(builder)?;
+    *slice = builder.into_cell()?.into();
     result
 }
 
@@ -1232,7 +1231,7 @@ where
             *result = HashmapFilterResult::Cancel;
             return Ok((false, None))
         }
-        Some(cell) => SliceData::load_cell(cell)?,
+        Some(cell) => SliceData::from(cell.clone()),
     };
     let key_length = key.length_in_bits();
     let this_bit_len = bit_len;
@@ -1272,14 +1271,14 @@ where
         Ok((false, Some(remainder)))
     } else if let Some((right, new_key, next_remainder)) = next.pop() {
         if let Some((left, _, _)) = next.pop() { // prepare new fork
-            let mut label = SliceData::load_builder(key.clone())?;
+            let mut label = SliceData::from(key.clone().into_cell()?);
             label.move_by(key_length)?;
             let (builder, remainder) = T::make_fork(&label, this_bit_len, left, right, false)?;
             *cell_opt = Some(builder.into_cell()?);
             Ok((true, Some(remainder)))
         } else { // replace fork with edge
             *key = new_key;
-            let mut label = SliceData::load_builder(key.clone())?;
+            let mut label = SliceData::from(key.clone().into_cell()?);
             label.move_by(key_length)?;
             let mut builder = T::make_cell_with_label(label, this_bit_len)?;
             if let Some(ref remainder) = next_remainder {
@@ -1311,7 +1310,7 @@ pub trait HashmapSubtree: HashmapType + Sized {
             let mut cursor = LabelReader::new(gas_consumer.load_cell(root.clone())?);
             let (key, rem_prefix) = down_by_tree::<Self>(prefix, &mut cursor, self.bit_len(), gas_consumer)?;
             if rem_prefix.is_none() {
-                let label = SliceData::load_builder(key)?;
+                let label = SliceData::from(key.into_cell()?);
                 let mut remainder = cursor.remainder()?;
                 let is_leaf = Self::is_leaf(&mut remainder);
                 if remainder.cell() != root {
@@ -1347,7 +1346,7 @@ pub trait HashmapSubtree: HashmapType + Sized {
             let mut cursor = LabelReader::new(gas_consumer.load_cell(root.clone())?);
             let (key, rem_prefix) = down_by_tree::<Self>(prefix, &mut cursor, self.bit_len(), gas_consumer)?;
             if rem_prefix.is_none() {
-                let mut label = SliceData::load_builder(key)?;
+                let mut label = SliceData::from(key.into_cell()?);
                 label.shrink_data(prefix_len..);
                 let mut remainder = cursor.remainder()?;
                 let is_leaf = Self::is_leaf(&mut remainder);
@@ -1382,7 +1381,7 @@ pub trait HashmapSubtree: HashmapType + Sized {
             }
             let mut remainder = cursor.remainder()?;
             let is_leaf = Self::is_leaf(&mut remainder);
-            let root = Self::make_cell_with_label_and_data(SliceData::load_builder(key)?, self.bit_len(), is_leaf, &remainder)?;
+            let root = Self::make_cell_with_label_and_data(key.into_cell()?.into(), self.bit_len(), is_leaf, &remainder)?;
             *self.data_mut() = Some(gas_consumer.finalize_cell(root)?);
         }
         Ok(self)
@@ -1395,7 +1394,7 @@ where T: HashmapType + ?Sized {
     let mut key = BuilderData::default();
     loop {
         key = cursor.get_label_raw(&mut bit_len, key)?;
-        let label = SliceData::load_cell(&key.clone().into_cell()?)?;
+        let label = SliceData::from(key.clone().into_cell()?);
         match SliceData::common_prefix(&label, prefix) {
             (_, None, Some(mut rem_prefix)) => { // continue down
                 bit_len = bit_len.checked_sub(1).ok_or(ExceptionCode::CellUnderflow)?;
@@ -1418,9 +1417,7 @@ impl<T: HashmapType + ?Sized> HashmapIterator<T> {
     pub fn from_hashmap(tree: &T) -> Self {
         let mut pos = vec![];
         if let Some(root) = tree.data() {
-            // must be checked here for Pruned cell
-            let cursor = SliceData::load_cell(root).expect("need to check root");
-            pos.push((LabelReader::new(cursor), tree.bit_len(), BuilderData::default()));
+            pos.push((LabelReader::with_cell(root), tree.bit_len(), BuilderData::default()));
         }
         Self { pos, phantom: PhantomData::<T> }
     }
