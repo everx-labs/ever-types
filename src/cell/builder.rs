@@ -31,45 +31,41 @@ pub struct BuilderData {
     level_mask: LevelMask,
 }
 
-// TBD
 impl From<BuilderData> for Cell {
     fn from(builder: BuilderData) -> Self {
         builder.into_cell().unwrap()
     }
 }
 
-// TBD
 impl From<BuilderData> for SliceData {
     fn from(builder: BuilderData) -> Self {
-        SliceData::load_builder(builder).unwrap()
+        builder.into_cell().unwrap().into()
     }
 }
 
-// TBD
 impl From<&BuilderData> for Cell {
     fn from(builder: &BuilderData) -> Self {
         builder.clone().into_cell().unwrap()
     }
 }
 
-// impl From<&mut BuilderData> for Cell {
-//     fn from(builder: &mut BuilderData) -> Self {
-//         builder.clone().into_cell().unwrap()
-//     }
-// }
-
-// TBD
-impl From<&BuilderData> for SliceData {
-    fn from(builder: &BuilderData) -> Self {
-        builder.clone().into()
+impl From<&mut BuilderData> for Cell {
+    fn from(builder: &mut BuilderData) -> Self {
+        builder.clone().into_cell().unwrap()
     }
 }
 
-// impl From<&mut BuilderData> for SliceData {
-//     fn from(builder: &mut BuilderData) -> Self {
-//         builder.clone().into_cell().unwrap().into()
-//     }
-// }
+impl From<&BuilderData> for SliceData {
+    fn from(builder: &BuilderData) -> Self {
+        builder.clone().into_cell().unwrap().into()
+    }
+}
+
+impl From<&mut BuilderData> for SliceData {
+    fn from(builder: &mut BuilderData) -> Self {
+        builder.clone().into_cell().unwrap().into()
+    }
+}
 
 impl From<&&Cell> for BuilderData {
     fn from(cell: &&Cell) -> Self {
@@ -103,12 +99,12 @@ impl Default for BuilderData {
 }
 
 impl BuilderData {
-    pub const fn default() -> Self { Self::new() }
-    pub const fn new() -> Self {
+    pub fn default() -> Self { Self::new() }
+    pub fn new() -> Self {
         BuilderData {
-            data: SmallVec::new_const(),
+            data: SmallVec::new(),
             length_in_bits: 0,
-            references: SmallVec::new_const(),
+            references:SmallVec::new(),
             cell_type: CellType::Ordinary,
             level_mask: LevelMask(0),
         }
@@ -203,8 +199,8 @@ impl BuilderData {
         if self == other {
             return Ok((None, None))
         }
-        let label1 = SliceData::load_builder(self.clone())?;
-        let label2 = SliceData::load_builder(other.clone())?;
+        let label1 = SliceData::from(self.clone().into_cell()?);
+        let label2 = SliceData::from(other.clone().into_cell()?);
         let (_prefix, rem1, rem2) = SliceData::common_prefix(&label1, &label2);
         // unwraps are safe because common_prefix returns None if slice is empty
         Ok((

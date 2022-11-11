@@ -275,19 +275,19 @@ pub type AccountId = SliceData;
 
 impl From<[u8; 32]> for AccountId {
     fn from(data: [u8; 32]) -> AccountId {
-        SliceData::load_builder(BuilderData::with_raw(SmallVec::from_slice(&data), 256).unwrap()).unwrap()
+        BuilderData::with_raw(SmallVec::from_slice(&data), 256).unwrap().into_cell().unwrap().into()
     }
 }
 
 impl From<UInt256> for AccountId {
     fn from(data: UInt256) -> AccountId {
-        SliceData::load_builder(BuilderData::with_raw(SmallVec::from_slice(&data.0), 256).unwrap()).unwrap()
+        BuilderData::with_raw(SmallVec::from_slice(&data.0), 256).unwrap().into_cell().unwrap().into()
     }
 }
 
 impl From<&UInt256> for AccountId {
     fn from(data: &UInt256) -> AccountId {
-        SliceData::load_builder(BuilderData::with_raw(SmallVec::from_slice(&data.0), 256).unwrap()).unwrap()
+        BuilderData::with_raw(SmallVec::from_slice(&data.0), 256).unwrap().into_cell().unwrap().into()
     }
 }
 
@@ -332,9 +332,7 @@ pub enum ExceptionCode {
     #[fail(display = "out of gas")]
     OutOfGas = 13,
     #[fail(display = "illegal instruction")]
-    IllegalInstruction = 14,
-    #[fail(display = "pruned cell")]
-    PrunedCellAccess = 15
+    IllegalInstruction = 14
 }
 
 /*
