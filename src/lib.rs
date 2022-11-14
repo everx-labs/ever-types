@@ -46,7 +46,6 @@ impl Mask for u8 {
     }
 }
 
-
 pub trait GasConsumer {
     fn finalize_cell(&mut self, builder: BuilderData) -> Result<Cell>;
     fn load_cell(&mut self, cell: Cell) -> Result<SliceData>;
@@ -58,10 +57,10 @@ impl GasConsumer for u64 {
         builder.into_cell()
     }
     fn load_cell(&mut self, cell: Cell) -> Result<SliceData> {
-        Ok(cell.into())
+        SliceData::load_cell(&cell)
     }
     fn finalize_cell_and_load(&mut self, builder: BuilderData) -> Result<SliceData> {
-        Ok(builder.into_cell()?.into())
+        SliceData::load_cell(&builder.into_cell()?)
     }
 }
 
