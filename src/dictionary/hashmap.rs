@@ -54,7 +54,7 @@ impl HashmapE {
     pub fn write_hashmap_root(&self, cell: &mut BuilderData) -> Result<()> {
         match self.data() {
             Some(root) => {
-                cell.checked_append_references_and_data(&SliceData::from(root))?;
+                cell.checked_append_references_and_data(&SliceData::load_cell(root)?)?;
                 Ok(())
             }
             None => fail!(ExceptionCode::CellUnderflow)
