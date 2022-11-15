@@ -19,6 +19,8 @@ use std::{
     ops::{BitOr, BitOrAssign, Deref},
     {cmp::{max, min}, io::{Read, Write, ErrorKind}},
     convert::TryInto,
+    fmt::{Display, Formatter},
+    collections::HashSet,
 };
 use sha2::{Sha256, Digest};
 use num::{FromPrimitive, ToPrimitive};
@@ -31,6 +33,10 @@ pub const MAX_DATA_BYTES: usize = 128; // including tag
 pub const MAX_LEVEL: usize = 3;
 pub const MAX_LEVEL_MASK: u8 = 7;
 pub const MAX_DEPTH: u16 = u16::MAX - 1;
+
+// recommended maximum depth, this value is safe for stack. Use custom stack size
+// to use bigger depths (see `test_max_depth`).
+pub const MAX_SAFE_DEPTH: u16 = 2048; 
 
 #[derive(Debug, Eq, PartialEq, Clone, Copy, Hash)]
 #[derive(num_derive::FromPrimitive, num_derive::ToPrimitive)]
@@ -87,19 +93,19 @@ impl LevelMask {
         self.0
     }
 
-    // if cell contains requared hash() - it will be returned,
+    // if cell contains required hash() - it will be returned,
     // else = max avaliable, but less then index
     //
     // rows - cell mask
     //       0(0)  1(1)  2(3)  3(7)  columns - index(mask)
-    // 0     0     0     0     0     cells - index(AND result)
-    // 1     0     1(1)  1(1)  1(1)
-    // 2     0     0(0)  1(2)  1(2)
-    // 3     0     1(1)  2(3)  2(3)
-    // 4     0     0(0)  0(0)  1(4)
-    // 5     0     1(1)  0(0)  2(5)
-    // 6     0     0(0)  1(2)  2(6)
-    // 7     0     1(1)  2(3)  3(7)
+    // 000     0     0     0     0     cells - index(AND result)
+    // 001     0     1(1)  1(1)  1(1)
+    // 010     0     0(0)  1(2)  1(2)
+    // 011     0     1(1)  2(3)  2(3)
+    // 100     0     0(0)  0(0)  1(4)
+    // 101     0     1(1)  0(0)  2(5)
+    // 110     0     0(0)  1(2)  2(6)
+    // 111     0     1(1)  2(3)  3(7)
     pub fn calc_hash_index(&self, mut index: usize) -> usize {
         index = min(index, 3);
         LevelMask::with_mask(self.0 & LevelMask::with_level(index as u8).0).level() as usize
@@ -112,6 +118,10 @@ impl LevelMask {
 
     pub fn virtualize(&self, virt_offset: u8) -> Self {
         LevelMask::with_mask(self.0 >> virt_offset)
+    }
+
+    pub fn is_significant_index(&self, index: usize) -> bool {
+        index == 0 || self.0 & LevelMask::with_level(index as u8).0 != 0
     }
 }
 
@@ -127,6 +137,12 @@ impl BitOr for LevelMask {
 impl BitOrAssign for LevelMask {
     fn bitor_assign(&mut self, rhs: Self) {
         self.0 |= rhs.0;
+    }
+}
+
+impl Display for LevelMask {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{:03b}", self.0)
     }
 }
 
@@ -337,8 +353,12 @@ impl Cell {
     /// Returns cell's hashes (representation and highers)
     pub fn hashes(&self) -> Vec<UInt256> {
         let mut hashes = Vec::new();
-        for i in 0..self.level() + 1 {
-            hashes.push(self.hash(i as usize))
+        let mut i = 0;
+        while hashes.len() < self.level() as usize + 1 {
+            if self.level_mask().is_significant_index(i) {
+                hashes.push(self.hash(i as usize))
+            }
+            i += 1;
         }
         hashes
     }
@@ -346,8 +366,12 @@ impl Cell {
     /// Returns cell's depth (for current state and each level)
     pub fn depths(&self) -> Vec<u16> {
         let mut depths = Vec::new();
-        for i in 0..self.level() + 1 {
-            depths.push(self.depth(i as usize))
+        let mut i = 0;
+        while depths.len() < self.level() as usize + 1 {
+            if self.level_mask().is_significant_index(i) {
+                depths.push(self.depth(i as usize))
+            }
+            i += 1;
         }
         depths
     }
@@ -660,8 +684,13 @@ pub(crate) fn cell_type(buf: &[u8]) -> CellType {
         // no
         CellType::Ordinary 
     } else {
-        // yes
-        CellType::from(cell_data(buf)[0]) 
+        match cell_data(buf).get(0) {
+            Some(byte) => CellType::from(*byte),
+            None => {
+                debug_assert!(false, "empty exotic cell data");
+                CellType::Unknown
+            }
+        }
     }
 }
 
@@ -818,7 +847,7 @@ fn build_cell_buf(
     hashes: Option<[UInt256; 4]>,
     depths: Option<[u16; 4]>
 ) -> Result<Vec<u8>> {
-    if cell_type != CellType::Ordinary && data.len() == 1{
+    if cell_type != CellType::Ordinary && data.len() == 1 {
         fail!("Exotic cell can't have empty data");
     }
     if data.len() > MAX_DATA_BYTES {
@@ -1316,6 +1345,15 @@ impl DataCell {
         Self::construct_cell(cell_data, references, 0)
     }
 
+    pub fn with_raw_data_and_max_depth(
+        references: Vec<Cell>,
+        data: Vec<u8>,
+        max_depth: u16
+    ) -> Result<DataCell> {
+        let cell_data = CellData::with_raw_data(data)?;
+        Self::construct_cell(cell_data, references, max_depth)
+    }
+
     fn construct_cell(
         cell_data: CellData, 
         references: Vec<Cell>,
@@ -1429,7 +1467,8 @@ impl DataCell {
             CellType::Unknown => fail!(ExceptionCode::RangeCheckError)
         };
         if self.cell_data.level_mask() != level_mask {
-            fail!(ExceptionCode::RangeCheckError)
+            fail!("Level mask mismatch {} != {}, type: {}", 
+                self.cell_data.level_mask(), level_mask, self.cell_type());
         }
 
         // calculate hashes and depths
@@ -1459,7 +1498,6 @@ impl DataCell {
             if i == 0 {
                 let data_size = (bit_len / 8) + if bit_len % 8 != 0 { 1 } else { 0 };
                 hasher.update(&self.data()[..data_size]);
-                //hasher.update(self.cell_data.data());
             } else {
                 hasher.update(self.cell_data.raw_hash(i - 1));
             }
@@ -1470,14 +1508,14 @@ impl DataCell {
                 let child_depth = child.depth(i + is_merkle_cell as usize);
                 depth = max(depth, child_depth + 1);
                 if ((max_depth != 0) && (depth > max_depth)) || (depth > MAX_DEPTH) {
-                    fail!("fail creating cell: depth {} > {}", depth, std::cmp::max(max_depth, MAX_DEPTH))
+                    fail!("fail creating cell: depth {} > {}", depth, std::cmp::min(max_depth, MAX_DEPTH))
                 }
                 hasher.update(&child_depth.to_be_bytes());
             }
 
             // hashes
             for child in self.references.iter() {
-                let child_hash = child.hash(if is_merkle_cell { i + 1 } else { i });
+                let child_hash = child.hash(i + is_merkle_cell as usize);
                 hasher.update(child_hash.as_slice());
             }
 
@@ -1560,11 +1598,11 @@ impl CellImpl for DataCell {
 struct UsageCell {
     cell: Cell,
     visit_on_load: bool,
-    visited: Weak<lockfree::set::Set<UInt256>>,
+    visited: Weak<lockfree::map::Map<UInt256, Cell>>,
 }
 
 impl UsageCell {
-    fn new(inner: Cell, visit_on_load: bool, visited: Weak<lockfree::set::Set<UInt256>>) -> Self {
+    fn new(inner: Cell, visit_on_load: bool, visited: Weak<lockfree::map::Map<UInt256, Cell>>) -> Self {
         let cell = Self {
             cell: inner,
             visit_on_load,
@@ -1577,7 +1615,7 @@ impl UsageCell {
     }
     fn visit(&self) -> bool {
         if let Some(visited) = self.visited.upgrade() {
-            visited.insert(self.cell.repr_hash()).ok();
+            visited.insert(self.cell.repr_hash(), self.cell.clone());
             return true;
         }
         false
@@ -1718,19 +1756,19 @@ impl CellImpl for VirtualCell {
 #[derive(Default)]
 pub struct UsageTree {
     root: Cell,
-    visited: Arc<lockfree::set::Set<UInt256>>,
+    visited: Arc<lockfree::map::Map<UInt256, Cell>>,
 }
 
 impl UsageTree {
     pub fn with_root(root: Cell) -> Self {
-        let visited = Arc::new(lockfree::set::Set::new());
+        let visited = Arc::new(lockfree::map::Map::new());
         let usage_cell = UsageCell::new(root, false, Arc::downgrade(&visited));
         let root = Cell::with_cell_impl_arc(Arc::new(usage_cell));
         Self { root, visited }
     }
 
     pub fn with_params(root: Cell, visit_on_load: bool) -> Self {
-        let visited = Arc::new(lockfree::set::Set::new());
+        let visited = Arc::new(lockfree::map::Map::new());
         let root = Cell::with_cell_impl_arc(Arc::new(
             UsageCell::new(root, visit_on_load, Arc::downgrade(&visited))
         ));
@@ -1757,14 +1795,33 @@ impl UsageTree {
         self.root.clone()
     }
 
-    /// destroy usage tree and free all cells
-    pub fn visited(self) -> lockfree::set::Set<UInt256> {
-        // safe because Arc is used to share weak pointers, nobody must clone this Arc
-        Arc::try_unwrap(self.visited).unwrap()
+    pub fn contains(&self, hash: &UInt256) -> bool {
+        self.visited.get(hash).is_some()
     }
 
-    pub fn contains(&self, hash: &UInt256) -> bool {
-        self.visited.contains(hash)
+    pub fn build_visited_subtree(
+        &self,
+        is_include: &impl Fn(&UInt256) -> bool
+    ) -> Result<HashSet<UInt256>> {
+        let mut subvisited = HashSet::new();
+        for guard in self.visited.iter() {
+            if is_include(guard.key()) {
+                self.visit_subtree(guard.val(), &mut subvisited)?
+            }
+        }
+        Ok(subvisited)
+    }
+
+    fn visit_subtree(&self, cell: &Cell, subvisited: &mut HashSet<UInt256>) -> Result<()> {
+        if subvisited.insert(cell.repr_hash()) {
+            for i in 0..cell.references_count() {
+                let child_hash = cell.reference_repr_hash(i)?;
+                if let Some(guard) = self.visited.get(&child_hash) {
+                    self.visit_subtree(guard.val(), subvisited)?
+                }
+            }
+        }
+        Ok(())
     }
 }
 

@@ -17,7 +17,9 @@ use std::fmt;
 use smallvec::SmallVec;
 
 use crate::{MAX_DATA_BITS, error, fail};
-use crate::cell::{append_tag, Cell, CellType, DataCell, find_tag, LevelMask, SliceData};
+use crate::cell::{
+    append_tag, Cell, CellType, DataCell, find_tag, LevelMask, SliceData, MAX_SAFE_DEPTH
+};
 use crate::types::{ExceptionCode, Result};
 
 const EXACT_CAPACITY: usize = 128;
@@ -165,8 +167,8 @@ impl BuilderData {
         }
     }
 
-    /// finalize cell allowing maximal depth
-    pub fn into_cell(self) -> Result<Cell> { self.finalize(0) }
+    /// finalize cell with default max depth
+    pub fn into_cell(self) -> Result<Cell> { self.finalize(MAX_SAFE_DEPTH) }
 
     /// use max_depth to limit depth
     pub fn finalize(mut self, max_depth: u16) -> Result<Cell> {
