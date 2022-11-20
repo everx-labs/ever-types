@@ -78,11 +78,11 @@ impl From<&&Cell> for BuilderData {
         let mut builder = BuilderData::with_raw(
             SmallVec::from_slice(cell.data()),
             cell.bit_length()
-        ).unwrap();
-        builder.references = cell.clone_references();
-        builder.cell_type = cell.cell_type();
-        builder.level_mask = cell.level_mask();
-        builder
+       ).unwrap();
+       builder.references = cell.clone_references();
+       builder.cell_type = cell.cell_type();
+       builder.level_mask = cell.level_mask();
+       builder
     }
 }
 

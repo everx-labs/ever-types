@@ -1760,6 +1760,39 @@ pub struct UsageTree {
 }
 
 impl UsageTree {
+
+    #[cfg(feature = "test_only")]
+    pub fn with_visited(visited: &[UInt256], root: &Cell) -> Result<Self> {
+
+        fn traverse(cell: &Cell, visited_hashes: &HashSet<UInt256>, visited: &Arc<lockfree::map::Map<UInt256, Cell>>) -> Option<Cell> {
+            let hash = cell.repr_hash();
+            if visited_hashes.contains(&hash) && visited.get(&hash).is_none() {
+                let usage_cell = Cell::with_cell_impl_arc(Arc::new(
+                    UsageCell::new(cell.clone(), false, Arc::downgrade(visited))
+                ));
+                visited.insert(hash, usage_cell.clone());
+
+                for child in cell.clone_references() {
+                    let _ = traverse(&child, visited_hashes, visited);
+                }
+
+                return Some(usage_cell);
+            }
+            None
+        }
+
+        let mut visited_set = HashSet::new();
+        for h in visited {
+            visited_set.insert(h.clone());
+        }
+
+        let visited_map = Arc::new(lockfree::map::Map::new());
+        let root = traverse(root, &visited_set, &visited_map)
+            .ok_or_else(|| error!("`visited` list doesn't contain tree root"))?;
+
+        Ok(Self {root, visited: visited_map})
+    }
+
     pub fn with_root(root: Cell) -> Self {
         let visited = Arc::new(lockfree::map::Map::new());
         let usage_cell = UsageCell::new(root, false, Arc::downgrade(&visited));
