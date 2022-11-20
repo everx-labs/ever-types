@@ -128,11 +128,11 @@ impl From<&Cell> for SliceData {
 impl From<Cell> for SliceData {
     fn from(cell: Cell) -> SliceData {
         SliceData {
-            references_window: 0..cell.references_count(),
-            data_window: 0..cell.bit_length(),
-            cell
-        }
-    }
+           references_window: 0..cell.references_count(),
+           data_window: 0..cell.bit_length(),
+           cell
+       }
+   }
 }
 
 impl SliceData {

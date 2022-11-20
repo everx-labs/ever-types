@@ -1361,6 +1361,20 @@ pub trait HashmapSubtree: HashmapType + Sized {
         Ok(())
     }
 
+    fn subtree_root_cell(&self, prefix: &SliceData) -> Result<Option<Cell>> {
+        let prefix_len = prefix.remaining_bits();
+        if prefix_len == 0 || self.bit_len() < prefix_len {
+            fail!("Invalid prefix len {}", prefix_len)
+        }
+        if let Some(root) = self.data() {
+            let mut cursor = LabelReader::new(SliceData::load_cell(root)?);
+            let _ = down_by_tree::<Self>(prefix, &mut cursor, self.bit_len(), &mut 0)?;
+            Ok(Some(cursor.cursor.cell().clone()))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// transform to subtree without the common prefix (dec bit_len)
     fn into_subtree_wo_prefix(mut self, prefix: &SliceData, gas_consumer: &mut dyn GasConsumer)-> Result<Self> {
         self.subtree_without_prefix(prefix, gas_consumer)?;
