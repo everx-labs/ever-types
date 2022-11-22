@@ -1821,7 +1821,7 @@ impl UsageTree {
     }
 
     pub fn root_slice(&self) -> SliceData {
-        SliceData::load_cell(&self.root).unwrap()
+        SliceData::load_cell(self.root_cell()).unwrap()
     }
 
     pub fn root_cell(&self) -> Cell {

@@ -2,7 +2,7 @@
 build = 'build.rs'
 edition = '2018'
 name = 'ton_types'
-version = '1.11.10'
+version = '1.11.11'
 
 [[bin]]
 name = 'test_cells'
@@ -10,15 +10,15 @@ path = 'bin/test_cells.rs'
 
 [dependencies]
 base64 = '0.13'
-crc = '1.8.1'
+crc = '1.8'
 failure = '0.1.6'
 hex = '0.4'
-lazy_static = '1.4.0'
+lazy_static = '1.4'
 log = '0.4'
 num = '0.4'
 num-derive = '0.3'
 num-traits = '0.2'
-rand = '0.8.3'
+rand = '0.8'
 sha2 = '0.9'
 lockfree = { git = 'https://github.com/tonlabs/lockfree.git' }
 smallvec = { features = [ 'const_new', 'union', 'write' ], version = '1.10' }

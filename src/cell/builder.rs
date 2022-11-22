@@ -40,61 +40,23 @@ impl From<BuilderData> for Cell {
     }
 }
 
-// TBD
-impl From<BuilderData> for SliceData {
-    fn from(builder: BuilderData) -> Self {
-        SliceData::load_builder(builder).unwrap()
-    }
-}
-
-// TBD
-impl From<&BuilderData> for Cell {
-    fn from(builder: &BuilderData) -> Self {
-        builder.clone().into_cell().unwrap()
-    }
-}
-
-// impl From<&mut BuilderData> for Cell {
-//     fn from(builder: &mut BuilderData) -> Self {
-//         builder.clone().into_cell().unwrap()
-//     }
-// }
-
-// TBD
-impl From<&BuilderData> for SliceData {
-    fn from(builder: &BuilderData) -> Self {
-        builder.clone().into()
-    }
-}
-
-// impl From<&mut BuilderData> for SliceData {
-//     fn from(builder: &mut BuilderData) -> Self {
-//         builder.clone().into_cell().unwrap().into()
-//     }
-// }
-
-impl From<&&Cell> for BuilderData {
-    fn from(cell: &&Cell) -> Self {
-        let mut builder = BuilderData::with_raw(
-            SmallVec::from_slice(cell.data()),
-            cell.bit_length()
-       ).unwrap();
-       builder.references = cell.clone_references();
-       builder.cell_type = cell.cell_type();
-       builder.level_mask = cell.level_mask();
-       builder
-    }
-}
-
 impl From<&Cell> for BuilderData {
     fn from(cell: &Cell) -> Self {
-        (&cell).into()
+        // safe because builder can contain same data as any cell
+        let mut builder = BuilderData::with_raw(
+                SmallVec::from_slice(cell.data()),
+                cell.bit_length()
+        ).unwrap();
+        builder.references = cell.clone_references();
+        builder.cell_type = cell.cell_type();
+        builder.level_mask = cell.level_mask();
+        builder
     }
 }
 
 impl From<Cell> for BuilderData {
     fn from(cell: Cell) -> Self {
-        (&&cell).into()
+        (&cell).into()
     }
 }
 

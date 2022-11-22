@@ -21,7 +21,7 @@ use crate::{error, fail, cell::{BuilderData, Cell, CellType, IBitstring, LevelMa
 use crate::types::{ExceptionCode, Result, UInt256};
 use smallvec::SmallVec;
 
-#[derive(Eq, Clone)]
+#[derive(Eq, Clone, Default)]
 pub struct SliceData {
     pub(super) cell: Cell,
     data_window: Range<usize>,
@@ -62,6 +62,7 @@ impl Hash for SliceData {
         }
     }
 }
+
 impl PartialEq for SliceData {
     fn eq(&self, slice: &SliceData) -> bool {
         let refs_count = self.remaining_references();
@@ -91,16 +92,6 @@ impl PartialEq for SliceData {
     }
 }
 
-impl Default for SliceData {
-    fn default() -> Self {
-        Self {
-            cell: Cell::default(),
-            data_window: 0..0,
-            references_window: 0..0,
-    }
-}
-}
-
 // TBD
 impl From<Vec<u8>> for SliceData {
     fn from(data: Vec<u8>) -> SliceData {
@@ -120,19 +111,15 @@ impl From<&[u8]> for SliceData {
 // TBD
 impl From<&Cell> for SliceData {
     fn from(cell: &Cell) -> SliceData {
-        cell.clone().into()
+        SliceData::load_cell(cell.clone()).unwrap()
     }
 }
 
 // TBD
 impl From<Cell> for SliceData {
     fn from(cell: Cell) -> SliceData {
-        SliceData {
-           references_window: 0..cell.references_count(),
-           data_window: 0..cell.bit_length(),
-           cell
-       }
-   }
+        SliceData::load_cell(cell).unwrap()
+    }
 }
 
 impl SliceData {
@@ -149,19 +136,23 @@ impl SliceData {
     }
 
     pub fn load_builder(builder: BuilderData) -> Result<SliceData> {
-        SliceData::load_cell(&builder.into_cell()?)
+        SliceData::load_cell(builder.into_cell()?)
     }
 
-    pub fn load_cell(cell: &Cell) -> Result<SliceData> {
+    pub fn load_cell(cell: Cell) -> Result<SliceData> {
         if cell.is_pruned() {
             fail!(ExceptionCode::PrunedCellAccess)
         } else {
             Ok(SliceData {
                 references_window: 0..cell.references_count(),
                 data_window: 0..cell.bit_length(),
-                cell: cell.clone()
+                cell
             })
         }
+    }
+
+    pub fn load_cell_ref(cell: &Cell) -> Result<SliceData> {
+        SliceData::load_cell(cell.clone())
     }
 
     pub fn from_string(value: &str) -> Result<SliceData> {
@@ -731,14 +722,6 @@ impl SliceData {
         std::mem::replace(self, SliceData::new_empty())
     }
 }
-
-// impl FromStr for SliceData {
-//     type Err = failure::Error;
-//     fn from_str(s: &str) -> Result<Self> {
-//         let vec = parse_slice_base(s, 0, 16).ok_or_else(|| error!(ExceptionCode::FatalError))?;
-//         Ok(BuilderData::with_bitstring(vec)?.into_cell()?.into())
-//     }
-// }
 
 impl fmt::Debug for SliceData {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

@@ -91,7 +91,7 @@ impl PfxHashmapE {
     pub fn is_prefix(&self, mut key: SliceData) -> Result<bool> {
         let mut bit_len = self.bit_len;
         let mut cursor = match self.data() {
-            Some(root) if !key.is_empty() => SliceData::load_cell(root)?,
+            Some(root) if !key.is_empty() => SliceData::load_cell_ref(root)?,
             _ => return Ok(false)
         };
         let mut label = cursor.get_label(bit_len)?;
@@ -111,7 +111,7 @@ impl PfxHashmapE {
                 debug_assert!(false);
                 return Ok(false) // problem
             }
-            cursor = SliceData::load_cell(&cursor.reference(next_index)?)?;
+            cursor = SliceData::load_cell(cursor.reference(next_index)?)?;
             bit_len -= label.remaining_bits() + 1;
             label = cursor.get_label(bit_len)?;
         }
@@ -156,7 +156,7 @@ impl PfxHashmapE {
     pub fn get_leaf_by_prefix(&self, mut key: SliceData) -> Result<(SliceData, Option<SliceData>, SliceData)> {
         let mut bit_len = self.bit_len;
         let mut cursor = match self.data() {
-            Some(root) if !key.is_empty() => SliceData::load_cell(root)?,
+            Some(root) if !key.is_empty() => SliceData::load_cell_ref(root)?,
             _ => return Ok((SliceData::default(), None, key))
         };
         let mut path = BuilderData::default();
@@ -181,7 +181,7 @@ impl PfxHashmapE {
                 return Ok((SliceData::load_builder(path)?, None, key)) // problem
             }
             path.append_bit_bool(next_index == 1)?;
-            cursor = SliceData::load_cell(&cursor.reference(next_index)?)?;
+            cursor = SliceData::load_cell(cursor.reference(next_index)?)?;
             bit_len -= label.remaining_bits() + 1;
             label = cursor.get_label(bit_len)?;
         }
@@ -195,7 +195,7 @@ impl PfxHashmapE {
                 return Ok((SliceData::load_builder(path)?, None, key)) // problem
             }
             path.append_bit_bool(next_index == 1)?;
-            cursor = SliceData::load_cell(&cursor.reference(next_index)?)?;
+            cursor = SliceData::load_cell(cursor.reference(next_index)?)?;
             if bit_len < label.remaining_bits() + 1 {
                 return Ok((SliceData::load_builder(path)?, None, key)) // problem
             }

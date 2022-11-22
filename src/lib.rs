@@ -57,10 +57,10 @@ impl GasConsumer for u64 {
         builder.into_cell()
     }
     fn load_cell(&mut self, cell: Cell) -> Result<SliceData> {
-        SliceData::load_cell(&cell)
+        SliceData::load_cell(cell)
     }
     fn finalize_cell_and_load(&mut self, builder: BuilderData) -> Result<SliceData> {
-        SliceData::load_cell(&builder.into_cell()?)
+        SliceData::load_builder(builder)
     }
 }
 
