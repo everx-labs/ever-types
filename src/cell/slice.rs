@@ -1,5 +1,5 @@
 /*
-* Copyright (C) 2019-2021 TON Labs. All Rights Reserved.
+* Copyright (C) 2019-2022 TON Labs. All Rights Reserved.
 *
 * Licensed under the SOFTWARE EVALUATION License (the "License"); you may not use
 * this file except in compliance with the License.
@@ -92,45 +92,7 @@ impl PartialEq for SliceData {
     }
 }
 
-// TBD
-impl From<Vec<u8>> for SliceData {
-    fn from(data: Vec<u8>) -> SliceData {
-        let len = data.len();
-        SliceData::from_raw(data, len * 8)
-    }
-}
-
-// TBD
-impl From<&[u8]> for SliceData {
-    fn from(data: &[u8]) -> SliceData {
-        let len = data.len();
-        SliceData::from_raw(data.to_vec(), len * 8)
-    }
-}
-
-// TBD
-impl From<&Cell> for SliceData {
-    fn from(cell: &Cell) -> SliceData {
-        SliceData::load_cell(cell.clone()).unwrap()
-    }
-}
-
-// TBD
-impl From<Cell> for SliceData {
-    fn from(cell: Cell) -> SliceData {
-        SliceData::load_cell(cell).unwrap()
-    }
-}
-
 impl SliceData {
-    // TODO: need to be const
-    pub fn default() -> SliceData {
-        Self {
-            cell: Cell::default(),
-            data_window: 0..0,
-            references_window: 0..0,
-        }
-    }
     pub fn new_empty() -> SliceData {
         SliceData::default()
     }

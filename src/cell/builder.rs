@@ -1,5 +1,5 @@
 /*
-* Copyright (C) 2019-2021 TON Labs. All Rights Reserved.
+* Copyright (C) 2019-2022 TON Labs. All Rights Reserved.
 *
 * Licensed under the SOFTWARE EVALUATION License (the "License"); you may not use
 * this file except in compliance with the License.
@@ -24,20 +24,13 @@ use crate::types::{ExceptionCode, Result};
 
 const EXACT_CAPACITY: usize = 128;
 
-#[derive(Debug, PartialEq, Clone, Eq)]
+#[derive(Debug, Default, PartialEq, Clone, Eq)]
 pub struct BuilderData {
     data: SmallVec<[u8; 128]>,
     length_in_bits: usize,
     references: SmallVec<[Cell; 4]>,
     cell_type: CellType,
     level_mask: LevelMask,
-}
-
-// TBD
-impl From<BuilderData> for Cell {
-    fn from(builder: BuilderData) -> Self {
-        builder.into_cell().unwrap()
-    }
 }
 
 impl From<&Cell> for BuilderData {
@@ -57,12 +50,6 @@ impl From<&Cell> for BuilderData {
 impl From<Cell> for BuilderData {
     fn from(cell: Cell) -> Self {
         (&cell).into()
-    }
-}
-
-impl Default for BuilderData {
-    fn default() -> Self {
-        BuilderData::new()
     }
 }
 

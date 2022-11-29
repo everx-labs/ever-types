@@ -1,5 +1,5 @@
 /*
-* Copyright (C) 2019-2021 TON Labs. All Rights Reserved.
+* Copyright (C) 2019-2022 TON Labs. All Rights Reserved.
 *
 * Licensed under the SOFTWARE EVALUATION License (the "License"); you may not use
 * this file except in compliance with the License.
@@ -47,6 +47,12 @@ pub enum CellType {
     LibraryReference,
     MerkleProof,
     MerkleUpdate,
+}
+
+impl Default for CellType {
+    fn default() -> CellType {
+        CellType::Ordinary
+    }
 }
 
 #[derive(Debug, Default, Eq, PartialEq, Clone, Copy, Hash)]
@@ -1031,7 +1037,7 @@ impl CellData {
         hashes: Option<[UInt256; 4]>,
         depths: Option<[u16; 4]>
     ) -> Result<Self> {
-        let buffer = build_cell_buf(cell_type, data, level_mask, refs as usize, store_hashes, hashes, depths)?;
+        let buffer = build_cell_buf(cell_type, data, level_mask, refs as usize, store_hashes, hashes.clone(), depths)?;
         debug_assert!(check_cell_buf(&buffer[..], false).is_ok());
         let hashes_count = if cell_type == CellType::PrunedBranch {
             1
@@ -1045,7 +1051,7 @@ impl CellData {
             (_, None, None) => (),
             (false, Some(hashes), Some(depths)) => {
                 for i in 0..hashes_count {
-                    hashes_depths.push((hashes[i], depths[i]));
+                    hashes_depths.push((hashes[i].clone(), depths[i]));
                 }
             }
             _ => fail!("`hashes` and `depths` existence are not correspond each other")
@@ -1818,10 +1824,6 @@ impl UsageTree {
         if let Some(cell) = cell_opt.as_mut() {
             *cell = self.use_cell(cell.clone(), visit_on_load);
         }
-    }
-
-    pub fn root_slice(&self) -> SliceData {
-        SliceData::load_cell(self.root_cell()).unwrap()
     }
 
     pub fn root_cell(&self) -> Cell {
