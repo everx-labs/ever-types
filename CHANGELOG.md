@@ -2,6 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version: 1.12.0
+- Remove bad types conversion
+
 ## Version: 1.11.11
 
 ### Bugfixes

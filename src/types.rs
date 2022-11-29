@@ -1,5 +1,5 @@
 /*
-* Copyright (C) 2019-2021 TON Labs. All Rights Reserved.
+* Copyright (C) 2019-2022 TON Labs. All Rights Reserved.
 *
 * Licensed under the SOFTWARE EVALUATION License (the "License"); you may not use
 * this file except in compliance with the License.
@@ -52,8 +52,7 @@ macro_rules! fail {
     };
 }
 
-// TBD: Copy
-#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(Clone, Default, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct UInt256([u8; 32]);
 
 impl PartialEq<SliceData> for UInt256 {
@@ -109,11 +108,6 @@ impl UInt256 {
     // TODO: usage should be changed to as_hex_string
     #[allow(clippy::wrong_self_convention)]
     pub fn to_hex_string(&self) -> String { self.as_hex_string() }
-
-    // TODO: usage should be changed to str::FromStr
-    // #[deprecated]
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(value: &str) -> Result<Self> { FromStr::from_str(value) }
 
     pub fn calc_file_hash(bytes: &[u8]) -> Self { Self::calc_sha256(bytes) }
 
@@ -180,13 +174,6 @@ impl UInt256 {
 impl From<[u8; 32]> for UInt256 {
     fn from(data: [u8; 32]) -> Self {
         UInt256(data)
-    }
-}
-
-// TBD: use inner
-impl From<UInt256> for [u8; 32] {
-    fn from(data: UInt256) -> Self {
-        data.0
     }
 }
 
