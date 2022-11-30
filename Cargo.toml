@@ -1,8 +1,8 @@
 [package]
 build = 'build.rs'
-edition = '2018'
+edition = '2021'
 name = 'ton_types'
-version = '1.12.1'
+version = '1.12.2'
 
 [[bin]]
 name = 'test_cells'

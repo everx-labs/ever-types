@@ -255,13 +255,13 @@ impl LabelReader {
 // use LabelReader adapter
 impl SliceData {
     pub fn get_label_raw(&mut self, max: &mut usize, key: BuilderData) -> Result<BuilderData> {
-        let mut cursor = LabelReader::new(std::mem::replace(self, SliceData::default()));
+        let mut cursor = LabelReader::new(std::mem::take(self));
         let key = cursor.get_label_raw(max, key)?;
         *self = cursor.remainder()?;
         Ok(key)
     }
     pub fn get_label(&mut self, max: usize) -> Result<SliceData> {
-        let mut cursor = LabelReader::new(std::mem::replace(self, SliceData::default()));
+        let mut cursor = LabelReader::new(std::mem::take(self));
         let key = cursor.get_label(max)?;
         *self = cursor.remainder()?;
         Ok(key)

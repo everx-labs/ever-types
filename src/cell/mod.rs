@@ -663,7 +663,7 @@ pub(crate) fn level(buf: &[u8]) -> u8 {
 
 #[inline(always)]
 pub(crate) fn level_mask(buf: &[u8]) -> LevelMask {
-    debug_assert!(buf.len() >= 1);
+    debug_assert!(!buf.is_empty());
     LevelMask::with_mask(buf[0] >> LEVELMASK_D1_OFFSET)
 }
 
@@ -672,14 +672,14 @@ pub(crate) fn store_hashes(buf: &[u8]) -> bool {
     if absent(buf) {
         false
     } else {
-        debug_assert!(buf.len() >= 1);
+        debug_assert!(!buf.is_empty());
         (buf[0] & HASHES_D1_FLAG) == HASHES_D1_FLAG
     }
 }
 
 #[inline(always)]
 pub(crate) fn exotic(buf: &[u8]) -> bool {
-    debug_assert!(buf.len() >= 1);
+    debug_assert!(!buf.is_empty());
     (buf[0] & EXOTIC_D1_FLAG) == EXOTIC_D1_FLAG
 }
 
@@ -690,7 +690,7 @@ pub(crate) fn cell_type(buf: &[u8]) -> CellType {
         // no
         CellType::Ordinary 
     } else {
-        match cell_data(buf).get(0) {
+        match cell_data(buf).first() {
             Some(byte) => CellType::from(*byte),
             None => {
                 debug_assert!(false, "empty exotic cell data");
@@ -705,7 +705,7 @@ pub(crate) fn refs_count(buf: &[u8]) -> usize {
     if absent(buf) {
         0
     } else {
-        debug_assert!(buf.len() >= 1);
+        debug_assert!(!buf.is_empty());
         (buf[0] & REFS_D1_MASK) as usize
     }
 }
@@ -714,7 +714,7 @@ pub(crate) fn refs_count(buf: &[u8]) -> usize {
 // absent cells are depricated. We support it only for "node se".
 // It contains only one description byte (constant) and hash.
 pub(crate) fn absent(buf: &[u8]) -> bool {
-    debug_assert!(buf.len() >= 1);
+    debug_assert!(!buf.is_empty());
     buf[0] == ABSENT_D1
 }
 
@@ -866,7 +866,7 @@ fn build_cell_buf(
         fail!("Level mask can't be {}", level_mask);
     }
 
-    let data_bit_len = find_tag(&data);
+    let data_bit_len = find_tag(data);
     let data_len = (data_bit_len / 8) + (data_bit_len % 8 != 0) as usize;
     let level_mask = LevelMask::with_mask(level_mask);
     let level = level_mask.level();
@@ -892,15 +892,15 @@ fn build_cell_buf(
             fail!("`hashes` or `depths` can't be none while `store_hashes` is true");
         }
         if let Some(hashes) = hashes {
-            for i in 0..hashes_count {
-                buf[offset..offset + SHA256_SIZE].copy_from_slice(hashes[i].as_slice());
+            for hash in hashes.iter().take(hashes_count) {
+                buf[offset..offset + SHA256_SIZE].copy_from_slice(hash.as_slice());
                 offset += SHA256_SIZE;
             }
         }
         if let Some(depths) = depths {
-            for i in 0..hashes_count {
-                buf[offset] = (depths[i] >> 8) as u8;
-                buf[offset + 1] = (depths[i] & 0xff) as u8;
+            for depth in depths.iter().take(hashes_count) {
+                buf[offset] = (depth >> 8) as u8;
+                buf[offset + 1] = (depth & 0xff) as u8;
                 offset += DEPTH_SIZE;
             }
         }
@@ -956,7 +956,7 @@ fn check_cell_buf(buf: &[u8], unbounded: bool) -> Result<()> {
         }
 
         let cell_data = cell_data(buf);
-        if exotic(buf) && cell_data.len() == 0 {
+        if exotic(buf) && cell_data.is_empty() {
             fail!("exotic cells must have non zero data length")
         }
         let data_bit_len = bit_len(buf);
@@ -1498,11 +1498,11 @@ impl DataCell {
                 LevelMask::with_level(i as u8)
             };
             d1d2[0] = calc_d1(level_mask, false, cell_type, self.references.len());
-            hasher.update(&d1d2);
+            hasher.update(d1d2);
 
             // data
             if i == 0 {
-                let data_size = (bit_len / 8) + if bit_len % 8 != 0 { 1 } else { 0 };
+                let data_size = (bit_len / 8) + usize::from(bit_len % 8 != 0);
                 hasher.update(&self.data()[..data_size]);
             } else {
                 hasher.update(self.cell_data.raw_hash(i - 1));
@@ -1516,7 +1516,7 @@ impl DataCell {
                 if ((max_depth != 0) && (depth > max_depth)) || (depth > MAX_DEPTH) {
                     fail!("fail creating cell: depth {} > {}", depth, std::cmp::min(max_depth, MAX_DEPTH))
                 }
-                hasher.update(&child_depth.to_be_bytes());
+                hasher.update(child_depth.to_be_bytes());
             }
 
             // hashes

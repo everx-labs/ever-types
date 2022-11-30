@@ -230,9 +230,9 @@ impl fmt::Display for UInt256 {
 impl LowerHex for UInt256 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if f.alternate() {
-            write!(f, "0x{}", hex::encode(&self.0))
+            write!(f, "0x{}", hex::encode(self.0))
         } else {
-            write!(f, "{}", hex::encode(&self.0))
+            write!(f, "{}", hex::encode(self.0))
             // write!(f, "{}...{}", hex::encode(&self.0[..2]), hex::encode(&self.0[30..32]))
         }
     }
@@ -243,7 +243,7 @@ impl UpperHex for UInt256 {
         if f.alternate() {
             write!(f, "0x")?;
         }
-        write!(f, "{}", hex::encode_upper(&self.0))
+        write!(f, "{}", hex::encode_upper(self.0))
     }
 }
 
