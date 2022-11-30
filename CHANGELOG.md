@@ -2,6 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version: 1.12.1
+- Add common as submodule
+
 ## Version: 1.12.0
 - Remove bad types conversion
 
