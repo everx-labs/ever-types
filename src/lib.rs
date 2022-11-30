@@ -24,6 +24,8 @@ pub mod cells_serialization;
 pub use cells_serialization::*;
 use smallvec::SmallVec;
 
+include!("../common/src/info.rs");
+
 pub trait Mask {
     fn bit(&self, bits: Self) -> bool;
     fn mask(&self, mask: Self) -> Self;
