@@ -61,7 +61,7 @@ pub struct SimpleOrderedCellsStorage {
 
 impl OrderedCellsStorage for SimpleOrderedCellsStorage {
     fn store_cell(&mut self, cell: Cell) -> Result<()> {
-        self.cells.insert(cell.repr_hash(), (cell.clone(), 0));
+        self.cells.insert(cell.repr_hash(), (cell, 0));
         Ok(())
     }
 
@@ -598,8 +598,8 @@ pub struct BocDeserializer<'a> {
     max_depth: u16,
 }
 
-impl<'a> BocDeserializer<'a> {
-    pub fn new() -> Self {
+impl<'a> Default for BocDeserializer<'a> {
+    fn default() -> Self {
         fn default_abort() -> bool { false }
         Self {
             abort: &default_abort,
@@ -608,6 +608,10 @@ impl<'a> BocDeserializer<'a> {
             max_depth: MAX_SAFE_DEPTH,
         }
     }
+}
+
+impl<'a> BocDeserializer<'a> {
+    pub fn new() -> Self { Self::default() }
 
     pub fn set_indexed_cells_storage(mut self, ics: Box<dyn IndexedCellsStorage>) -> Self {
         self.indexed_cells = ics;
@@ -748,10 +752,8 @@ impl<'a> BocDeserializer<'a> {
                 index2.push(src.position() as u32);
                 skip_cell(&mut src, header.ref_size)?;
             }
-        } else {
-            if index.len() < header.cells_count * header.offset_size {
-                fail!("Invalid data: too small to fit index");
-            }
+        } else if index.len() < header.cells_count * header.offset_size {
+            fail!("Invalid data: too small to fit index");
         }
         #[cfg(not(target_family = "wasm"))]
         let index_time = now1.elapsed().as_millis();
@@ -803,7 +805,7 @@ impl<'a> BocDeserializer<'a> {
                 roots.push(self.done_cells.get(*i)?.clone());
             }
         } else {
-            roots.push(self.done_cells.get(0)?.clone());
+            roots.push(self.done_cells.get(0)?);
         }
     
         #[cfg(not(target_family = "wasm"))]
@@ -970,10 +972,8 @@ fn precheck_cells_tree_len(header: &BocHeader, header_len: u64, actual_len: u64,
         if actual_len < len {
             fail!("Actual boc length {} is smaller than calculated one {}", actual_len, len);
         }
-    } else {
-        if actual_len != len {
-            fail!("Actual boc length {} in not equal calculated one {}", actual_len, len);
-        }
+    } else if actual_len != len {
+        fail!("Actual boc length {} in not equal calculated one {}", actual_len, len);
     }
     Ok(())
 }
@@ -1016,12 +1016,12 @@ fn read_raw_cell<T>(
         if refs_count > MAX_REFERENCES_COUNT {
             fail!("refs_count can't be {}", refs_count);
         }
-        for i in 0..refs_count {
+        for reference in refs.iter_mut().take(refs_count) {
             let r = src.read_be_uint(ref_size)? as u32;
             if r > cells_count as u32 || r <= cell_index as u32 {
                 fail!("reference out of range, cells_count: {}, ref: {}, cell_index: {}", cells_count, r, cell_index)
             } else {
-                refs[i] = r;
+                *reference = r;
             }
         }
     }

@@ -2,6 +2,9 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version: 1.12.2
+- Fix for clippy
+
 ## Version: 1.12.1
 - Add common as submodule
 
