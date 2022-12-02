@@ -2,7 +2,7 @@
 build = 'build.rs'
 edition = '2021'
 name = 'ton_types'
-version = '1.12.2'
+version = '1.12.3'
 
 [[bin]]
 name = 'test_cells'
