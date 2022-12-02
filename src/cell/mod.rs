@@ -1399,6 +1399,7 @@ impl DataCell {
 
         let bit_len = self.bit_length();
         let cell_type = self.cell_type();
+        let store_hashes = self.store_hashes();
 
         // println!("{} {}bits {:03b}", self.cell_type(), bit_len, self.level_mask().mask());
 
@@ -1417,6 +1418,22 @@ impl DataCell {
                 }
                 if self.data()[1] != self.cell_data.level_mask().0 {
                     fail!("fail creating pruned branch cell: data[1] {} != {}", self.data()[1], self.cell_data.level_mask().0)
+                }
+                let level = self.level() as usize;
+                if level == 0 {
+                    fail!("Pruned branch cell must have non zero level");
+                }
+                let data = self.data();
+                let mut offset = 1 + 1 + level * SHA256_SIZE;
+                for _ in 0..level {
+                    let depth = ((data[offset] as u16) << 8) | (data[offset + 1] as u16);
+                    if depth > MAX_DEPTH {
+                        fail!("Depth of pruned branch cell is too big");
+                    }
+                    offset += DEPTH_SIZE;
+                }
+                if store_hashes {
+                    fail!("store_hashes flag is not supported for pruned branch cell");
                 }
             }
             CellType::MerkleProof => {
@@ -1485,9 +1502,11 @@ impl DataCell {
         // pruned cell stores all hashes except representetion in data
         let hashes_count = if is_pruned_cell { 1 } else { self.level() as usize + 1 };
 
-        let store_hashes = self.store_hashes();
         let mut d1d2: [u8; 2] = self.raw_data()?[..2].try_into()?;
         
+        // Hashes are calculated started from smallest indexes. 
+        // Representation hash is calculated last and "includes" all previous hashes
+        // For pruned branch cell only representation hash is calculated
         for i in 0..hashes_count {
             let mut hasher = Sha256::new();
 
