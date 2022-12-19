@@ -1368,8 +1368,12 @@ pub trait HashmapSubtree: HashmapType + Sized {
         }
         if let Some(root) = self.data() {
             let mut cursor = LabelReader::new(SliceData::load_cell_ref(root)?);
-            let _ = down_by_tree::<Self>(prefix, &mut cursor, self.bit_len(), &mut 0)?;
-            Ok(Some(cursor.cursor.cell().clone()))
+            let (_key, reminder_prefix) = down_by_tree::<Self>(prefix, &mut cursor, self.bit_len(), &mut 0)?;
+            if reminder_prefix.is_none() {
+                Ok(Some(cursor.cursor.cell().clone()))
+            } else {
+                Ok(None)
+            }
         } else {
             Ok(None)
         }
