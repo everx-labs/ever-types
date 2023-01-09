@@ -1,5 +1,5 @@
 /*
-* Copyright (C) 2019-2021 TON Labs. All Rights Reserved.
+* Copyright (C) 2019-2023 TON Labs. All Rights Reserved.
 *
 * Licensed under the SOFTWARE EVALUATION License (the "License"); you may not use
 * this file except in compliance with the License.
@@ -600,11 +600,10 @@ pub struct BocDeserializer<'a> {
 
 impl<'a> Default for BocDeserializer<'a> {
     fn default() -> Self {
-        fn default_abort() -> bool { false }
         Self {
-            abort: &default_abort,
-            indexed_cells: Box::new(HashMap::new()),
-            done_cells: Box::new(HashMap::new()),
+            abort: &|| false,
+            indexed_cells: Box::<HashMap::<u32, RawCell>>::default(),
+            done_cells: Box::<HashMap::<u32, Cell>>::default(),
             max_depth: MAX_SAFE_DEPTH,
         }
     }
@@ -766,7 +765,7 @@ impl<'a> BocDeserializer<'a> {
             check_abort(self.abort)?;
 
             let offset = if header.index_included {
-                let mut offset = cells_start as usize;
+                let mut offset = cells_start;
                 if cell_index > 0 {
                     let o = (cell_index - 1) * header.offset_size;
                     let mut o2 = std::io::Cursor::new(&index[o..o + header.offset_size])
@@ -869,7 +868,7 @@ fn deserialize_cells_tree_header<T>(src: &mut T) -> Result<BocHeader> where T: R
             index_included = first_byte & 0b1000_0000 != 0;
             has_crc = first_byte & 0b0100_0000 != 0;
             has_cache_bits = first_byte & 0b0010_0000 != 0;
-            let flags = ((first_byte & 0b0001_1000) >> 3) as u8;
+            let flags = (first_byte & 0b0001_1000) >> 3;
             if flags != 0 {
                 fail!("non-zero flags field is not supported")
             }

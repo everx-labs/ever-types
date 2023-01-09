@@ -1,5 +1,5 @@
 /*
-* Copyright (C) 2019-2022 TON Labs. All Rights Reserved.
+* Copyright (C) 2019-2023 TON Labs. All Rights Reserved.
 *
 * Licensed under the SOFTWARE EVALUATION License (the "License"); you may not use
 * this file except in compliance with the License.
@@ -330,7 +330,7 @@ impl SliceData {
             if q < self.cell.data().len() - 1 {
                 ret |= self.cell.data()[q + 1] as u16;
             }
-            Ok(((ret >> (8 - r)) as u8 >> (8 - bits)) as u8)
+            Ok((ret >> (8 - r)) as u8 >> (8 - bits))
         }
     }
 
@@ -573,7 +573,7 @@ impl SliceData {
             }
             let a_bits = a.get_bits(offset, last_bits_len).unwrap();
             let b_bits = b.get_bits(offset, last_bits_len).unwrap();
-            let diff = (a_bits ^ b_bits) as u8;
+            let diff = a_bits ^ b_bits;
             let mut diff = diff.leading_zeros() as usize;
             diff -= 8 - last_bits_len;
             let diff = cmp::min(diff, last_bits_len);
@@ -675,7 +675,7 @@ impl SliceData {
 
     pub fn append_reference(&mut self, other: SliceData) -> &mut SliceData {
         let mut builder = BuilderData::from_slice(self);
-        builder.append_reference_cell(other.into_cell());
+        builder.checked_append_reference(other.into_cell()).unwrap();
         *self = SliceData::load_builder(builder).expect("it should be used only in tests");
         self
     }
@@ -699,7 +699,7 @@ impl fmt::Display for SliceData {
                 self.data_window.end,
                 self.references_window.start,
                 self.references_window.end,
-                hex::encode(&self.get_bytestring(0)),
+                hex::encode(self.get_bytestring(0)),
                 self.cell)
     }
 }
