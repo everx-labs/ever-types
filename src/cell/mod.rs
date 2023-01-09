@@ -1,5 +1,5 @@
 /*
-* Copyright (C) 2019-2022 TON Labs. All Rights Reserved.
+* Copyright (C) 2019-2023 TON Labs. All Rights Reserved.
 *
 * Licensed under the SOFTWARE EVALUATION License (the "License"); you may not use
 * this file except in compliance with the License.
@@ -152,16 +152,18 @@ impl Display for LevelMask {
     }
 }
 
-impl From<u8> for CellType {
-    fn from(num: u8) -> CellType {
-        match num {
+impl TryFrom<u8> for CellType {
+    type Error = crate::Error;
+    fn try_from(num: u8) -> Result<CellType> {
+        let typ = match num {
             1 => CellType::PrunedBranch,
             2 => CellType::LibraryReference,
             3 => CellType::MerkleProof,
             4 => CellType::MerkleUpdate,
             0xff => CellType::Ordinary,
-            _ => CellType::Unknown,
-        }
+            _ => fail!("unknown cell type {}", num)
+        };
+        Ok(typ)
     }
 }
 
@@ -362,7 +364,7 @@ impl Cell {
         let mut i = 0;
         while hashes.len() < self.level() as usize + 1 {
             if self.level_mask().is_significant_index(i) {
-                hashes.push(self.hash(i as usize))
+                hashes.push(self.hash(i))
             }
             i += 1;
         }
@@ -375,7 +377,7 @@ impl Cell {
         let mut i = 0;
         while depths.len() < self.level() as usize + 1 {
             if self.level_mask().is_significant_index(i) {
-                depths.push(self.depth(i as usize))
+                depths.push(self.depth(i))
             }
             i += 1;
         }
@@ -691,7 +693,7 @@ pub(crate) fn cell_type(buf: &[u8]) -> CellType {
         CellType::Ordinary 
     } else {
         match cell_data(buf).first() {
-            Some(byte) => CellType::from(*byte),
+            Some(byte) => CellType::try_from(*byte).unwrap_or(CellType::Unknown),
             None => {
                 debug_assert!(false, "empty exotic cell data");
                 CellType::Unknown
@@ -1481,7 +1483,7 @@ impl DataCell {
         for child in self.references.iter() {
             children_mask |= child.level_mask();
         }
-        let level_mask = match self.cell_type() {
+        let level_mask = match cell_type {
             CellType::Ordinary => children_mask,
             CellType::PrunedBranch => self.level_mask(),
             CellType::LibraryReference => LevelMask::with_mask(0),
@@ -1491,7 +1493,7 @@ impl DataCell {
         };
         if self.cell_data.level_mask() != level_mask {
             fail!("Level mask mismatch {} != {}, type: {}", 
-                self.cell_data.level_mask(), level_mask, self.cell_type());
+                self.cell_data.level_mask(), level_mask, cell_type);
         }
 
         // calculate hashes and depths
@@ -1583,7 +1585,7 @@ impl CellImpl for DataCell {
     }
 
     fn bit_length(&self) -> usize {
-        self.cell_data.bit_length() as usize
+        self.cell_data.bit_length()
     }
 
     fn references_count(&self) -> usize {

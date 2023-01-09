@@ -1,5 +1,5 @@
 /*
-* Copyright (C) 2019-2022 TON Labs. All Rights Reserved.
+* Copyright (C) 2019-2023 TON Labs. All Rights Reserved.
 *
 * Licensed under the SOFTWARE EVALUATION License (the "License"); you may not use
 * this file except in compliance with the License.
@@ -16,11 +16,12 @@ use std::fmt;
 
 use smallvec::SmallVec;
 
-use crate::{MAX_DATA_BITS, error, fail};
 use crate::cell::{
-    append_tag, Cell, CellType, DataCell, find_tag, LevelMask, SliceData, MAX_SAFE_DEPTH
+    append_tag, find_tag, Cell, CellType, DataCell, LevelMask, SliceData,
+    MAX_DATA_BITS, MAX_SAFE_DEPTH,
 };
 use crate::types::{ExceptionCode, Result};
+use crate::{error, fail};
 
 const EXACT_CAPACITY: usize = 128;
 
@@ -33,23 +34,17 @@ pub struct BuilderData {
     level_mask: LevelMask,
 }
 
+// TBD
 impl From<&Cell> for BuilderData {
     fn from(cell: &Cell) -> Self {
-        // safe because builder can contain same data as any cell
-        let mut builder = BuilderData::with_raw(
-                SmallVec::from_slice(cell.data()),
-                cell.bit_length()
-        ).unwrap();
-        builder.references = cell.clone_references();
-        builder.cell_type = cell.cell_type();
-        builder.level_mask = cell.level_mask();
-        builder
+        BuilderData::from_cell(cell)
     }
 }
 
+// TBD
 impl From<Cell> for BuilderData {
     fn from(cell: Cell) -> Self {
-        (&cell).into()
+        BuilderData::from_cell(&cell)
     }
 }
 
@@ -162,6 +157,18 @@ impl BuilderData {
             rem1.map(|rem| rem.get_bit(0).expect("check common_prefix function") as usize),
             rem2.map(|rem| rem.get_bit(0).expect("check common_prefix function") as usize)
         ))
+    }
+
+    pub fn from_cell(cell: &Cell) -> BuilderData {
+        // safe because builder can contain same data as any cell
+        let mut builder = BuilderData::with_raw(
+                SmallVec::from_slice(cell.data()),
+                cell.bit_length()
+        ).unwrap();
+        builder.references = cell.clone_references();
+        builder.cell_type = cell.cell_type();
+        builder.level_mask = cell.level_mask();
+        builder
     }
 
     pub fn from_slice(slice: &SliceData) -> BuilderData {
@@ -279,12 +286,22 @@ impl BuilderData {
         &mut self.level_mask
     }
 
-    pub fn append_reference_cell(&mut self, child: Cell) {
-        self.references.push(child);
+    pub fn checked_append_reference(&mut self, cell: Cell) -> Result<&mut Self> {
+        if self.references_free() == 0 {
+            fail!(ExceptionCode::CellOverflow)
+        } else {
+            self.references.push(cell);
+            Ok(self)
+        }  
     }
 
-    pub fn prepend_reference_cell(&mut self, child: Cell) {
-        self.references.insert(0, child);
+    pub fn checked_prepend_reference(&mut self, cell: Cell) -> Result<&mut Self> {
+        if self.references_free() == 0 {
+            fail!(ExceptionCode::CellOverflow)
+        } else {
+            self.references.insert(0, cell);
+            Ok(self)
+        }
     }
 
     pub fn replace_data(&mut self, data: impl Into<SmallVec<[u8; 128]>>, length_in_bits: usize) {
@@ -326,14 +343,6 @@ impl BuilderData {
 }
 
 // use only for test purposes
-impl BuilderData {
-    pub fn append_reference(&mut self, child: BuilderData) {
-        self.references.push(child.into_cell().unwrap());
-    }
-    pub fn prepend_reference(&mut self, child: BuilderData) {
-        self.references.insert(0, child.into_cell().unwrap());
-    }
-}
 
 impl fmt::Display for BuilderData {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

@@ -1,5 +1,5 @@
 /*
-* Copyright (C) 2019-2021 TON Labs. All Rights Reserved.
+* Copyright (C) 2019-2023 TON Labs. All Rights Reserved.
 *
 * Licensed under the SOFTWARE EVALUATION License (the "License"); you may not use
 * this file except in compliance with the License.
@@ -12,7 +12,7 @@
 */
 
 use crate::{error, fail};
-use crate::cell::{BuilderData, Cell, find_tag, MAX_DATA_BITS, MAX_REFERENCES_COUNT, SliceData};
+use crate::cell::{BuilderData, find_tag, MAX_DATA_BITS, MAX_REFERENCES_COUNT, SliceData};
 use crate::types::{ExceptionCode, Result};
 
 impl BuilderData {
@@ -45,24 +45,6 @@ impl BuilderData {
         self.references().len() + count <= MAX_REFERENCES_COUNT
     }
 
-    pub fn checked_append_reference(&mut self, cell: Cell) -> Result<&mut Self> {
-        if self.references().len() >= MAX_REFERENCES_COUNT {
-            fail!(ExceptionCode::CellOverflow)
-        } else {
-            self.append_reference_cell(cell);
-            Ok(self)
-        }  
-    }
-
-    pub fn checked_prepend_reference(&mut self, cell: Cell) -> Result<&mut Self> {
-        if self.references().len() >= MAX_REFERENCES_COUNT {
-            fail!(ExceptionCode::CellOverflow)
-        } else {
-            self.prepend_reference_cell(cell);
-            Ok(self)
-        }
-    }
-
     pub fn check_enough_space(&self, size: usize) -> bool {
         self.length_in_bits() + size <= MAX_DATA_BITS 
     }
@@ -73,7 +55,7 @@ impl BuilderData {
         }
         self.append_raw(other.get_bytestring(0).as_slice(), other.remaining_bits())?;
         for i in 0..other.remaining_references() {
-            self.append_reference_cell(other.reference(i)?);
+            self.checked_append_reference(other.reference(i)?)?;
         }
         Ok(self)
     }
