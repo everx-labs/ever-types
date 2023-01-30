@@ -191,6 +191,9 @@ impl<S: OrderedCellsStorage> BagOfCells<S> {
 
         let mut roots_set = HashSet::new();
         for root in &root_cells {
+            if root.virtualization() != 0 {
+                fail!("Virtual cells serialisation is prohibited");
+            }
             if !roots_set.insert(root.repr_hash()) {
                 fail!("roots must be all unique")
             }
@@ -405,6 +408,9 @@ impl<S: OrderedCellsStorage> BagOfCells<S> {
         abort: &dyn Fn() -> bool,
     ) -> Result<()> {
         check_abort(abort)?;
+        if cell.virtualization() != 0 {
+            fail!("Virtual cells serialisation is prohibited");
+        }
         let hash = cell.repr_hash();
         let absent = absent_cells.contains(&hash);
         Self::update_counters(&cell, absent, total_data_size, total_references, total_cells);
