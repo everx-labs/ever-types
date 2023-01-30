@@ -225,6 +225,8 @@ pub trait CellImpl: Sync + Send {
     fn tree_bits_count(&self) -> u64 { 0 }
 
     fn tree_cell_count(&self) -> u64 { 0 }
+
+    fn virtualization(&self) -> u8 { 0 }
 }
 
 //#[derive(Clone)]
@@ -256,6 +258,10 @@ impl Cell {
                 VirtualCell::with_cell_and_offset(self, offset)
             )
         }
+    }
+
+    pub fn virtualization(&self) -> u8 {
+        self.0.virtualization()
     }
 
     pub fn with_cell_impl<T: 'static + CellImpl>(cell_impl: T) -> Self {
@@ -1501,15 +1507,23 @@ impl DataCell {
         let is_merkle_cell = self.is_merkle();
         let is_pruned_cell = self.is_pruned();
 
-        // pruned cell stores all hashes except representetion in data
-        let hashes_count = if is_pruned_cell { 1 } else { self.level() as usize + 1 };
-
         let mut d1d2: [u8; 2] = self.raw_data()?[..2].try_into()?;
         
         // Hashes are calculated started from smallest indexes. 
         // Representation hash is calculated last and "includes" all previous hashes
         // For pruned branch cell only representation hash is calculated
-        for i in 0..hashes_count {
+        let mut hash_array_index = 0;
+        for i in 0..=3 {
+
+            // Hash is calculated only for "1" bits of level mask.
+            // Hash for i = 0 is calculated anyway.
+            // For example if mask = 0b010 i = 0, 2
+            // for example if mask = 0b001 i = 0, 1
+            // for example if mask = 0b011 i = 0, 1, 2
+            if i != 0 && (is_pruned_cell || ((1 << (i - 1)) & level_mask.mask()) == 0) {
+                continue;
+            }
+
             let mut hasher = Sha256::new();
 
             // descr bytes
@@ -1557,7 +1571,8 @@ impl DataCell {
                     fail!("Calculated hash is not equal stored one");
                 }
             } else {
-                self.cell_data.set_hash_depth(i, hash.as_slice(), depth)?;
+                self.cell_data.set_hash_depth(hash_array_index, hash.as_slice(), depth)?;
+                hash_array_index += 1;
             }
         }
 
@@ -1778,6 +1793,9 @@ impl CellImpl for VirtualCell {
     fn tree_bits_count(&self) -> u64 { self.cell.tree_bits_count() }
 
     fn tree_cell_count(&self) -> u64 { self.cell.tree_cell_count() }
+
+    fn virtualization(&self) -> u8 { self.offset }
+
 }
 
 #[derive(Default)]
