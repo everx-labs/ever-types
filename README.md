@@ -39,3 +39,7 @@ Contribution to the project is expected to be done via pull requests submission.
 ## License
 
 See the [LICENSE](LICENSE) file for details.
+
+## Tags
+
+`blockchain` `everscale` `rust` `venom-blockchain` `venom-developer-program`
