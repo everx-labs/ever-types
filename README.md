@@ -1,13 +1,41 @@
-# ton-labs-types
+# ever-types
 
-## Prerequisites
+Fundamental data types for Everscale/Venom nodes
 
-https://www.rust-lang.org/en-US/install.html
+## Table of Contents
 
-## To Build & Run:
+- [About](#about)
+- [Getting Started](#getting-started)
+- [Usage](#usage)
+- [Contributing](#contributing)
+- [License](#license)
+
+## About
+
+Implementation of operations with fundamental data types used in Everscale/Venom nodes in safe Rust. 
+
+## Getting Started
+
+### Prerequisites
+
+Rust complier v1.65+.
+
+### Installing
 
 ```
-cargo build
-cargo run
+git clone --recurse-submodules https://github.com/tonlabs/ever-types.git
+cd ever-types
+cargo build --release
 ```
 
+## Usage
+
+This project output is the library which is used as a part of Everscale/Venom node. Also it can be used in standalone tools.
+
+## Contributing
+
+Contribution to the project is expected to be done via pull requests submission.
+
+## License
+
+See the [LICENSE](LICENSE) file for details.
