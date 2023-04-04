@@ -104,6 +104,8 @@ impl SliceData {
     pub fn load_cell(cell: Cell) -> Result<SliceData> {
         if cell.is_pruned() {
             fail!(ExceptionCode::PrunedCellAccess)
+        } else if cell.cell_type() == CellType::Big {
+            fail!(ExceptionCode::BigCellAccess)
         } else {
             Ok(SliceData {
                 references_window: 0..cell.references_count(),

@@ -1,5 +1,5 @@
 use std::{
-    alloc::{GlobalAlloc, System, Layout}, sync::{Arc, atomic::{AtomicU64, Ordering}}, 
+    alloc::{GlobalAlloc, System, Layout}, sync::{atomic::{AtomicU64, Ordering}, Arc}, 
     thread, time::Duration
 };
 
@@ -62,7 +62,7 @@ fn main() {
     let now = std::time::Instant::now();
     println!("now 0 {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs());
     
-    let root = ton_types::cells_serialization::deserialize_tree_of_cells(&mut file).unwrap();
+    let root = ton_types::boc::BocReader::new().read(&mut file).unwrap().withdraw_single_root().unwrap();
     //let root = ton_types::cells_serialization::deserialize_tree_of_cells_inmem(data).unwrap();
     
     // assert_eq!(
@@ -84,7 +84,7 @@ fn main() {
     println!("serialize_toc");
 
     let now = std::time::Instant::now();
-    let v = ton_types::serialize_toc(&root).unwrap();
+    let v = ton_types::boc::write_boc(&root).unwrap();
     println!("now 17 {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs());   
     println!("serialize_toc {}ms", now.elapsed().as_millis());
 
@@ -94,7 +94,7 @@ fn main() {
     println!("now 0 {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs());
     
     //let root = ton_types::cells_serialization::deserialize_tree_of_cells(&mut file).unwrap();
-    let root2 = ton_types::cells_serialization::deserialize_tree_of_cells_inmem(Arc::new(v)).unwrap();
+    let root2 = ton_types::boc::BocReader::new().read_inmem(Arc::new(v)).unwrap().withdraw_single_root().unwrap();
     
     println!("now 7 {}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs());    
     println!("deserialize_tree_of_cells {}ms", now.elapsed().as_millis());

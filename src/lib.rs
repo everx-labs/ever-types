@@ -20,8 +20,8 @@ pub use self::cell::*;
 pub mod dictionary;
 pub use self::dictionary::*;
 
-pub mod cells_serialization;
-pub use cells_serialization::*;
+pub mod boc;
+pub use boc::*;
 use smallvec::SmallVec;
 
 include!("../common/src/info.rs");

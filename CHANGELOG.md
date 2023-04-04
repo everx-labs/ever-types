@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.0
+- Added big cell. Call `create_big_cell` to create one.
+- BOC routines: supported big cells and refactoring. 
+  Created two basic structs for in-depth working with BOC: `BocWriter` and `BocReader`.
+  Additionally three convinient wrappers: `write_boc`, `read_boc` and `read_single_root_boc`, that you'll probably want to use.
+
 ## Version: 1.12.2
 - Fix for clippy
 
