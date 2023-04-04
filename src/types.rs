@@ -322,7 +322,9 @@ pub enum ExceptionCode {
     #[fail(display = "illegal instruction")]
     IllegalInstruction = 14,
     #[fail(display = "pruned cell")]
-    PrunedCellAccess = 15
+    PrunedCellAccess = 15,
+    #[fail(display = "big cell")]
+    BigCellAccess = 16
 }
 
 /*

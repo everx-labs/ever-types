@@ -34,20 +34,6 @@ pub struct BuilderData {
     level_mask: LevelMask,
 }
 
-// TBD
-impl From<&Cell> for BuilderData {
-    fn from(cell: &Cell) -> Self {
-        BuilderData::from_cell(cell)
-    }
-}
-
-// TBD
-impl From<Cell> for BuilderData {
-    fn from(cell: Cell) -> Self {
-        BuilderData::from_cell(&cell)
-    }
-}
-
 impl BuilderData {
     pub const fn default() -> Self { Self::new() }
     pub const fn new() -> Self {
@@ -116,6 +102,9 @@ impl BuilderData {
 
     /// use max_depth to limit depth
     pub fn finalize(mut self, max_depth: u16) -> Result<Cell> {
+        if self.cell_type == CellType::Big {
+            fail!("Big cell creation by builder is prohibited");
+        }
         if self.cell_type == CellType::Ordinary {
             // For Ordinary cells - level is set automatically,
             // for other types - it must be set manually by set_level_mask()
@@ -126,12 +115,14 @@ impl BuilderData {
         append_tag(&mut self.data, self.length_in_bits);
 
         Ok(Cell::with_cell_impl(
-            DataCell::with_max_depth(
+            DataCell::with_params(
                 self.references.to_vec(),
                 &self.data,
                 self.cell_type,
                 self.level_mask.mask(),
-                max_depth,
+                Some(max_depth),
+                None,
+                None,
             )?
         ))
     }
@@ -159,16 +150,18 @@ impl BuilderData {
         ))
     }
 
-    pub fn from_cell(cell: &Cell) -> BuilderData {
-        // safe because builder can contain same data as any cell
+    pub fn from_cell(cell: &Cell) -> Result<BuilderData> {
+        if cell.cell_type() == CellType::Big {
+            fail!("Can't create a builder from a big cell");
+        }
         let mut builder = BuilderData::with_raw(
                 SmallVec::from_slice(cell.data()),
                 cell.bit_length()
-        ).unwrap();
+        )?;
         builder.references = cell.clone_references();
         builder.cell_type = cell.cell_type();
         builder.level_mask = cell.level_mask();
-        builder
+        Ok(builder)
     }
 
     pub fn from_slice(slice: &SliceData) -> BuilderData {
@@ -320,6 +313,9 @@ impl BuilderData {
     }
 
     pub fn set_type(&mut self, cell_type: CellType) {
+
+        // TODO: big cells ?
+
         self.cell_type = cell_type;
     }
 
