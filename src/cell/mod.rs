@@ -39,22 +39,17 @@ pub const MAX_DEPTH: u16 = u16::MAX - 1;
 // to use bigger depths (see `test_max_depth`).
 pub const MAX_SAFE_DEPTH: u16 = 2048; 
 
-#[derive(Debug, Eq, PartialEq, Clone, Copy, Hash)]
+#[derive(Debug, Default, Eq, PartialEq, Clone, Copy, Hash)]
 #[derive(num_derive::FromPrimitive, num_derive::ToPrimitive)]
 pub enum CellType {
     Unknown,
+    #[default]
     Ordinary,
     PrunedBranch,
     LibraryReference,
     MerkleProof,
     MerkleUpdate,
     Big,
-}
-
-impl Default for CellType {
-    fn default() -> CellType {
-        CellType::Ordinary
-    }
 }
 
 #[derive(Debug, Default, Eq, PartialEq, Clone, Copy, Hash)]

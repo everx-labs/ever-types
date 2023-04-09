@@ -17,12 +17,18 @@ pub use self::types::*;
 pub mod cell;
 pub use self::cell::*;
 
+pub mod crypto;
+pub use self::crypto::*;
+
 pub mod dictionary;
 pub use self::dictionary::*;
 
 pub mod boc;
 pub use boc::*;
 use smallvec::SmallVec;
+
+pub mod wrappers;
+pub use self::wrappers::*;
 
 include!("../common/src/info.rs");
 

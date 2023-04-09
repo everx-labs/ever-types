@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.1
+
+- Added crypto functions from crypto-repo
+- Added wrappers for sha256, sha512, base64
+- Bumped version of crc crate to 3.0
+- Fix for clippy
+
 ## Version 2.0.0
 - Added big cell. Call `create_big_cell` to create one.
 - BOC routines: supported big cells and refactoring. 

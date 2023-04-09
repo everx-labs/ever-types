@@ -812,7 +812,7 @@ where
                     false => func(SliceData::load_builder(key)?, Some(cursor_1.clone()), Some(cursor))
                 }
             }
-        )? || (!chk && !func(SliceData::load_builder(key1)?, Some(cursor_1.clone()), None)?) {
+        )? || (!chk && !func(SliceData::load_builder(key1)?, Some(cursor_1), None)?) {
             return Ok(false)
         }
     } else { // leaf of 2 is reached
@@ -832,7 +832,7 @@ where
                     false => func(SliceData::load_builder(key)?, Some(cursor), Some(cursor_2.clone()))
                 }
             }
-        )? || (!chk && !func(SliceData::load_builder(key2)?, None, Some(cursor_2.clone()))?) {
+        )? || (!chk && !func(SliceData::load_builder(key2)?, None, Some(cursor_2))?) {
             return Ok(false)
         }
     }

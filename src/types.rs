@@ -1,5 +1,5 @@
 /*
-* Copyright (C) 2019-2022 TON Labs. All Rights Reserved.
+* Copyright (C) 2019-2023 EverX Rights Reserved.
 *
 * Licensed under the SOFTWARE EVALUATION License (the "License"); you may not use
 * this file except in compliance with the License.
@@ -11,15 +11,15 @@
 * limitations under the License.
 */
 
-use crate::cell::{BuilderData, SliceData};
+use crate::{cell::{BuilderData, SliceData}, base64_decode_to_slice};
 use num::FromPrimitive;
 use sha2::Digest;
 use std::{cmp, convert::TryInto, fmt, fmt::{LowerHex, UpperHex}, str::{self, FromStr}};
 use smallvec::SmallVec;
 
 pub type Error = failure::Error;
-pub type Result<T> = std::result::Result<T, failure::Error>;
-pub type Failure = Option<failure::Error>;
+pub type Result<T> = std::result::Result<T, Error>;
+pub type Failure = Option<Error>;
 pub type Status = Result<()>;
 
 #[macro_export]
@@ -197,18 +197,16 @@ impl From<Vec<u8>> for UInt256 {
 }
 
 impl FromStr for UInt256 {
-    type Err = failure::Error;
+    type Err = Error;
     fn from_str(value: &str) -> Result<Self> {
-        let bytes = match value.len() {
-            64 => hex::decode(value)?,
-            66 => hex::decode(&value[2..])?,
-            44 => base64::decode(value)?,
-            len => fail!("invalid account ID string length (64 expected), but got {} for string {}", len, value)
-        };
-        match bytes.try_into() {
-            Ok(bytes) => Ok(Self(bytes)),
-            Err(bytes) => fail!("array length is {} for {}", bytes.len(), value)
+        let mut result = Self::default();
+        match value.len() {
+            64 => hex::decode_to_slice(value, &mut result.0)?,
+            66 => hex::decode_to_slice(&value[2..], &mut result.0)?,
+            44 => base64_decode_to_slice(value, &mut result.0)?,
+            _ => fail!("invalid account ID string (32 bytes expected), but got string {}", value)
         }
+        Ok(result)
     }
 }
 
@@ -280,7 +278,7 @@ impl From<&UInt256> for AccountId {
 }
 
 impl FromStr for AccountId {
-    type Err = failure::Error;
+    type Err = Error;
     fn from_str(s: &str) -> Result<Self> {
         let uint: UInt256 = FromStr::from_str(s)?;
         Ok(AccountId::from(uint.0))
