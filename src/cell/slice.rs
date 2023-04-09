@@ -1,5 +1,5 @@
 /*
-* Copyright (C) 2019-2023 TON Labs. All Rights Reserved.
+* Copyright (C) 2019-2023 EverX. All Rights Reserved.
 *
 * Licensed under the SOFTWARE EVALUATION License (the "License"); you may not use
 * this file except in compliance with the License.
@@ -474,6 +474,16 @@ impl SliceData {
             fail!(ExceptionCode::CellUnderflow)
         }
         Ok((0..bytes).map(|_| self.get_next_byte().unwrap()).collect::<Vec<_>>())
+    }
+
+    pub fn get_next_bytes_to_slice(&mut self, buffer: &mut [u8]) -> Result<()> {
+        if buffer.len() * 8 > self.remaining_bits() {
+            fail!(ExceptionCode::CellUnderflow)
+        }
+        for b in buffer {
+            *b = self.get_next_byte()?;
+        }
+        Ok(())
     }
 
     pub fn get_bytestring(&self, mut offset: usize) -> Vec<u8> {

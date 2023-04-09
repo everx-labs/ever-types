@@ -1,5 +1,5 @@
 /*
-* Copyright (C) 2019-2023 TON Labs. All Rights Reserved.
+* Copyright (C) 2019-2023 EverX. All Rights Reserved.
 *
 * Licensed under the SOFTWARE EVALUATION License (the "License"); you may not use
 * this file except in compliance with the License.
@@ -18,7 +18,8 @@ use std::{
     sync::Arc, ops::Deref,
 };
 
-use crc::{crc32, Hasher32};
+use crc::{Crc, CRC_32_ISCSI, Digest};
+const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 
 use crate::{
     cell::{self, Cell, DataCell, SHA256_SIZE, DEPTH_SIZE, MAX_DATA_BYTES, MAX_SAFE_DEPTH},
@@ -204,7 +205,7 @@ impl<'a, S: OrderedCellsStorage> BocWriter<'a, S> {
         custom_offset_size: Option<usize>,
     ) -> Result<()> {
         
-        let dest = &mut IoCrcFilter::new(dest);
+        let mut dest = IoCrcFilter::new_writer(dest);
 
         let bytes_total_cells = Self::number_of_bytes_to_fit(self.cells_count);
         let ref_size = custom_ref_size.map_or(bytes_total_cells, |crs| {
@@ -277,8 +278,7 @@ impl<'a, S: OrderedCellsStorage> BocWriter<'a, S> {
         }
 
         if include_crc {
-            let crc = dest.sum32();
-            dest.write_all(&crc.to_le_bytes())?;
+            dest.finalize()?;
         }
 
         self.cells.cleanup()?;
@@ -477,7 +477,7 @@ impl<'a> BocReader<'a> {
         let src_full_len = src.seek(SeekFrom::End(0))? - position;
         src.seek(SeekFrom::Start(position))?;
 
-        let mut src = IoCrcFilter::new(src);
+        let mut src = IoCrcFilter::new_reader(src);
 
         let header = Self::read_header(&mut src)?;
         let header_len = src.stream_position()? - position;
@@ -538,11 +538,7 @@ impl<'a> BocReader<'a> {
         }
 
         if header.has_crc {
-            let crc = src.sum32();
-            let read_crc = src.read_le_u32()?;
-            if read_crc != crc {
-                fail!("crc not the same, values: {}, {}", read_crc, crc)
-            }
+            src.check_crc()?;
         }
 
         #[cfg(not(target_family = "wasm"))]
@@ -653,9 +649,9 @@ impl<'a> BocReader<'a> {
         #[cfg(not(target_family = "wasm"))]
         let now1 = std::time::Instant::now();
         if header.has_crc {
-            let mut hasher = crc32::Digest::new(crc32::CASTAGNOLI);
-            hasher.write(&data[..data.len() - 4]);
-            let crc = hasher.sum32();
+            let mut hasher = CASTAGNOLI.digest();
+            hasher.update(&data[..data.len() - 4]);
+            let crc = hasher.finalize();
             src.set_position(data.len() as u64 - 4);
             let read_crc = src.read_le_u32()?;
             if read_crc != crc {
@@ -953,19 +949,40 @@ impl<'a> BocReader<'a> {
 /// Filters given Write or Read object's write or read operations and calculates data's CRC
 struct IoCrcFilter<'a, T> {
     io_object: &'a mut T,
-    hasher: crc32::Digest
+    hasher: Digest<'a, u32>
 }
 
-impl<'a, T> IoCrcFilter<'a, T> {
-    pub fn new(io_object: &'a mut T) -> Self {
+impl<'a, T: Write> IoCrcFilter<'a, T> {
+    pub fn new_writer(io_object: &'a mut T) -> Self {
         IoCrcFilter{ 
             io_object,
-            hasher: crc32::Digest::new(crc32::CASTAGNOLI) 
+            hasher: CASTAGNOLI.digest()
         }
     }
 
-    pub fn sum32(&self) -> u32 {
-        self.hasher.sum32()
+    pub fn finalize(self) -> Result<()> {
+        let crc = self.hasher.finalize();
+        self.io_object.write_all(&crc.to_le_bytes())?;
+        Ok(())
+    }
+
+}
+
+impl<'a, T: Read> IoCrcFilter<'a, T> {
+    pub fn new_reader(io_object: &'a mut T) -> Self {
+        IoCrcFilter{ 
+            io_object,
+            hasher: CASTAGNOLI.digest()
+        }
+    }
+
+    pub fn check_crc(self) -> Result<()> {
+        let read_crc = self.io_object.read_le_u32()?;
+        let crc = self.hasher.finalize();
+        if read_crc != crc {
+            fail!("crc not the same, values: {}, {}", read_crc, crc)
+        }
+        Ok(())
     }
 }
 
@@ -978,7 +995,7 @@ impl<'a, T> IoCrcFilter<'a, T> where T: Seek {
 
 impl<'a, T> Write for IoCrcFilter<'a, T> where T: Write {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.hasher.write(buf);
+        self.hasher.update(buf);
         self.io_object.write(buf)
     }
 
@@ -990,7 +1007,7 @@ impl<'a, T> Write for IoCrcFilter<'a, T> where T: Write {
 impl<'a, T> Read for IoCrcFilter<'a, T> where T: Read {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let res = self.io_object.read(buf);
-        self.hasher.write(buf);
+        self.hasher.update(buf);
         res
     }
 }
