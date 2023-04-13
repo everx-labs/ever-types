@@ -11,15 +11,13 @@
 * limitations under the License.
 */
 
-use crate::{error, fail, Result, base64_decode, base64_encode, sha256_digest2};
-use aes_ctr::cipher::stream::{NewStreamCipher, SyncStreamCipher};
-use core::ops::Range;
-use ed25519::signature::Verifier;
-use std::{
-    convert::TryInto,
-    fmt::{self, Debug, Display, Formatter},
-    sync::Arc,
+use crate::{
+    fail, Result, base64_decode, base64_encode, ed25519_create_expanded_private_key, 
+    ed25519_create_private_key, ed25519_create_public_key, ed25519_expand_private_key, 
+    ed25519_generate_private_key, ed25519_verify, ed25519_sign, Ed25519ExpandedPrivateKey, 
+    Ed25519PrivateKey, sha256_digest_slices, x25519_shared_secret
 };
+use std::{convert::TryInto, fmt::{self, Debug, Display, Formatter}, sync::Arc};
 
 pub trait KeyOption: Sync + Send + Debug {
     fn id(&self) -> &Arc<KeyId>;
@@ -33,23 +31,6 @@ pub trait KeyOption: Sync + Send + Debug {
     fn shared_secret(&self, other_pub_key: &[u8]) -> Result<[u8; 32]>;
 }
 
-pub struct AesCtr {
-    aes_ctr: aes_ctr::Aes256Ctr,
-}
-
-impl AesCtr {
-    pub fn with_params(key: &[u8], ctr: &[u8]) -> Self {
-        let aes_ctr = aes_ctr::Aes256Ctr::new(
-            aes_ctr::cipher::generic_array::GenericArray::from_slice(key),
-            aes_ctr::cipher::generic_array::GenericArray::from_slice(ctr),
-        );
-        Self { aes_ctr }
-    }
-    pub fn apply_keystream(&mut self, buf: &mut [u8], range: Range<usize>) {
-        self.aes_ctr.apply_keystream(&mut buf[range]);
-    }
-}
-
 #[derive(Debug)]
 pub struct Ed25519KeyOption {
     id: Arc<KeyId>,
@@ -58,6 +39,7 @@ pub struct Ed25519KeyOption {
 }
 
 impl Ed25519KeyOption {
+
     pub const KEY_TYPE: i32 = 1209251014;
     pub const EXP_KEY_SIZE: usize = 64;
     pub const PVT_KEY_SIZE: usize = 32;
@@ -65,21 +47,21 @@ impl Ed25519KeyOption {
 
     /// Create from Ed25519 expanded secret key raw data
     pub fn from_expanded_key(exp_key: &[u8; Self::EXP_KEY_SIZE]) -> Result<Arc<dyn KeyOption>> {
-        Self::create_from_expanded_key(ed25519_dalek::ExpandedSecretKey::from_bytes(exp_key)?)
+        Self::create_from_expanded_key(ed25519_create_expanded_private_key(exp_key)?)
     }
 
     /// Create from Ed25519 secret key raw data
     pub fn from_private_key(pvt_key: &[u8; Self::PVT_KEY_SIZE]) -> Result<Arc<dyn KeyOption>> {
-        Self::create_from_expanded_key(ed25519_dalek::ExpandedSecretKey::from(
-            &ed25519_dalek::SecretKey::from_bytes(pvt_key)?,
-        ))
+        Self::create_from_expanded_key(
+            ed25519_expand_private_key(&ed25519_create_private_key(pvt_key)?)?
+        )
     }
 
     /// Create from Ed25519 secret key raw data and export JSON
     pub fn from_private_key_with_json(
         pvt_key: &[u8; Self::PVT_KEY_SIZE],
     ) -> Result<(KeyOptionJson, Arc<dyn KeyOption>)> {
-        Self::create_from_private_key_with_json(ed25519_dalek::SecretKey::from_bytes(pvt_key)?)
+        Self::create_from_private_key_with_json(ed25519_create_private_key(pvt_key)?)
     }
 
     /// Create from Ed25519 secret key JSON
@@ -139,22 +121,20 @@ impl Ed25519KeyOption {
 
     /// Generate new Ed25519 key
     pub fn generate() -> Result<Arc<dyn KeyOption>> {
-        Self::create_from_expanded_key(ed25519_dalek::ExpandedSecretKey::from(
-            &ed25519_dalek::SecretKey::generate(&mut rand::thread_rng()),
-        ))
+        Self::create_from_expanded_key(
+            ed25519_expand_private_key(&ed25519_generate_private_key()?)?
+        )
     }
 
     /// Generate new Ed25519 key and export JSON
     pub fn generate_with_json() -> Result<(KeyOptionJson, Arc<dyn KeyOption>)> {
-        Self::create_from_private_key_with_json(ed25519_dalek::SecretKey::generate(
-            &mut rand::thread_rng(),
-        ))
+        Self::create_from_private_key_with_json(ed25519_generate_private_key()?)
     }
 
     fn create_from_expanded_key(
-        exp_key: ed25519_dalek::ExpandedSecretKey,
+        exp_key: Ed25519ExpandedPrivateKey
     ) -> Result<Arc<dyn KeyOption>> {
-        let pub_key = ed25519_dalek::PublicKey::from(&exp_key).to_bytes();
+        let pub_key = ed25519_create_public_key(&exp_key)?.to_bytes();
         let exp_key = exp_key.to_bytes();
         let ret = Self {
             id: Self::calc_id(Self::KEY_TYPE, &pub_key),
@@ -165,9 +145,9 @@ impl Ed25519KeyOption {
     }
 
     fn create_from_private_key_with_json(
-        pvt_key: ed25519_dalek::SecretKey,
+        pvt_key: Ed25519PrivateKey
     ) -> Result<(KeyOptionJson, Arc<dyn KeyOption>)> {
-        let ret = Self::create_from_expanded_key(ed25519_dalek::ExpandedSecretKey::from(&pvt_key))?;
+        let ret = Self::create_from_expanded_key(ed25519_expand_private_key(&pvt_key)?)?;
         let json = KeyOptionJson {
             type_id: Self::KEY_TYPE,
             pub_key: None,
@@ -178,7 +158,7 @@ impl Ed25519KeyOption {
 
     // Calculate key ID
     fn calc_id(type_id: i32, pub_key: &[u8; Self::PUB_KEY_SIZE]) -> Arc<KeyId> {
-        let data = sha256_digest2(&[&type_id.to_le_bytes(), pub_key]);
+        let data = sha256_digest_slices(&[&type_id.to_le_bytes(), pub_key]);
         KeyId::from_data(data)
     }
 
@@ -192,6 +172,7 @@ impl Ed25519KeyOption {
 }
 
 impl KeyOption for Ed25519KeyOption {
+
     /// Get key id
     fn id(&self) -> &Arc<KeyId> {
         &self.id
@@ -213,39 +194,24 @@ impl KeyOption for Ed25519KeyOption {
 
     /// Calculate signature
     fn sign(&self, data: &[u8]) -> Result<Vec<u8>> {
-        let exp_key = ed25519_dalek::ExpandedSecretKey::from_bytes(self.exp_key()?)?;
-        let pub_key = if let Ok(key) = self.pub_key() {
-            ed25519_dalek::PublicKey::from_bytes(key)?
-        } else {
-            ed25519_dalek::PublicKey::from(&exp_key)
-        };
-        Ok(exp_key.sign(data, &pub_key).to_bytes().to_vec())
+        ed25519_sign(self.exp_key()?, self.pub_key().ok(), data)
     }
 
     /// Verify signature
     fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()> {
-        let pub_key = ed25519_dalek::PublicKey::from_bytes(self.pub_key()?)?;
-        pub_key.verify(data, &ed25519::Signature::from_bytes(signature)?)?;
-        Ok(())
+        ed25519_verify(self.pub_key()?, data, signature)
     }
 
+    /// Calculate shared secret
     fn shared_secret(&self, other_pub_key: &[u8]) -> Result<[u8; 32]> {
-        let point = curve25519_dalek::edwards::CompressedEdwardsY(other_pub_key.try_into()?)
-            .decompress()
-            .ok_or_else(|| error!("Bad public key data"))?
-            .to_montgomery()
-            .to_bytes();
-        let exp_key = self.exp_key()?;
-        Ok(x25519_dalek::x25519(
-            exp_key[..Self::PVT_KEY_SIZE].try_into()?,
-            point,
-        ))
+        x25519_shared_secret(self.exp_key()?, other_pub_key)
     }
 
     #[cfg(feature = "export_key")]
     fn export_key(&self) -> Result<&[u8]> {
         Ok(self.exp_key()?)
     }
+
 }
 
 /// ADNL key ID (node ID)
