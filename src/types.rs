@@ -11,9 +11,8 @@
 * limitations under the License.
 */
 
-use crate::{cell::{BuilderData, SliceData}, base64_decode_to_slice};
+use crate::{cell::{BuilderData, SliceData}, base64_decode_to_slice, sha256_digest};
 use num::FromPrimitive;
-use sha2::Digest;
 use std::{cmp, convert::TryInto, fmt, fmt::{LowerHex, UpperHex}, str::{self, FromStr}};
 use smallvec::SmallVec;
 
@@ -107,12 +106,16 @@ impl UInt256 {
 
     // TODO: usage should be changed to as_hex_string
     #[allow(clippy::wrong_self_convention)]
-    pub fn to_hex_string(&self) -> String { self.as_hex_string() }
+    pub fn to_hex_string(&self) -> String { 
+        self.as_hex_string()
+    }
 
-    pub fn calc_file_hash(bytes: &[u8]) -> Self { Self::calc_sha256(bytes) }
+    pub fn calc_file_hash(bytes: &[u8]) -> Self { 
+        Self::calc_sha256(bytes)
+    }
 
     pub fn calc_sha256(bytes: &[u8]) -> Self {
-        Self(sha2::Sha256::digest(bytes).into())
+        Self(sha256_digest(bytes))
     }
 
     pub fn first_u64(&self) -> u64 {

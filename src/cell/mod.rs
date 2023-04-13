@@ -11,18 +11,12 @@
 * limitations under the License.
 */
 
-use crate::{error, fail};
-use crate::types::{ExceptionCode, Result, UInt256, ByteOrderRead};
+use crate::{error, fail, Sha256, types::{ExceptionCode, Result, UInt256, ByteOrderRead}};
 use std::{
-    sync::{Arc, Weak, atomic::{AtomicU64, Ordering}},
-    fmt,
-    ops::{BitOr, BitOrAssign, Deref},
-    {cmp::{max, min}, io::{Read, Write, ErrorKind}},
-    convert::TryInto,
-    fmt::{Display, Formatter},
-    collections::HashSet,
+    cmp::{max, min}, collections::HashSet, convert::TryInto, fmt::{self, Display, Formatter}, 
+    io::{Read, Write, ErrorKind}, ops::{BitOr, BitOrAssign, Deref}, 
+    sync::{Arc, Weak, atomic::{AtomicU64, Ordering}}
 };
-use sha2::{Sha256, Digest};
 use num::{FromPrimitive, ToPrimitive};
 
 pub const SHA256_SIZE: usize = 32;
@@ -179,7 +173,7 @@ impl From<CellType> for u8 {
     }
 }
 
-impl fmt::Display for CellType {
+impl fmt::Display for CellType {                                                       
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let msg = match *self {
             CellType::Ordinary => "Ordinary",
