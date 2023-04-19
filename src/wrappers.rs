@@ -62,6 +62,10 @@ pub fn base64_encode(input: impl AsRef<[u8]>) -> String {
     base64::encode(input)
 }
 
+pub fn base64_encode_url_safe(input: impl AsRef<[u8]>) -> String {
+    base64::encode_config(input, base64::URL_SAFE)
+}
+
 // Ed25519 --------------------------------------------------------------
 
 pub struct Ed25519ExpandedPrivateKey {

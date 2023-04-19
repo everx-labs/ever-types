@@ -324,7 +324,7 @@ impl BuilderData {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.length_in_bits() == 0 && self.references().len() == 0
+        self.length_in_bits() == 0 && self.references().is_empty()
     }
 
     pub fn trunc(&mut self, length_in_bits: usize) -> Result<()> {

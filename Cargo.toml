@@ -2,7 +2,7 @@
 build = 'common/build/build.rs'
 edition = '2021'
 name = 'ton_types'
-version = '2.0.2'
+version = '2.0.3'
 
 [[bin]]
 name = 'test_cells'
@@ -29,4 +29,7 @@ x25519-dalek = '1.2'
 lockfree = { git = 'https://github.com/tonlabs/lockfree.git' }
 serde = { features = [ 'derive', 'rc' ], version = '1.0.105' }
 smallvec = { features = [ 'const_new', 'union', 'write' ], version = '1.10' }
+
+[features]
+export_key = [  ]
 
