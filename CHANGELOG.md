@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.4
+
+- Fixed bug in x25519_shared_secret
+
 ## Version 2.0.3
 
 - Added interface base64_encode_url_safe
