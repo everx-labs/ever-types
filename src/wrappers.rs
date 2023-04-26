@@ -159,7 +159,7 @@ pub fn x25519_shared_secret(exp_pvt_key: &[u8], other_pub_key: &[u8]) -> Result<
         .ok_or_else(|| error!("Bad public key data"))?
         .to_montgomery()
         .to_bytes();
-    Ok(x25519_dalek::x25519(exp_pvt_key.try_into()?, point))
+    Ok(x25519_dalek::x25519(exp_pvt_key[..32].try_into()?, point))
 }
 
 // SHA-2 ----------------------------------------------------------------
