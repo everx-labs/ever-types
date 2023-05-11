@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.5
+
+- Enhanced hashmap split by prefix
+- Enhanced hashmap merge in any place
+- Implemented hashmap filter split for one pass splitting like two hashmap filters
+
 ## Version 2.0.4
 
 - Fixed bug in x25519_shared_secret
