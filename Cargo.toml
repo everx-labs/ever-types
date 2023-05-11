@@ -4,10 +4,6 @@ edition = '2021'
 name = 'ton_types'
 version = '2.0.5'
 
-[[bin]]
-name = 'test_cells'
-path = 'bin/test_cells.rs'
-
 [dependencies]
 aes-ctr = '0.6'
 base64 = '0.13'
