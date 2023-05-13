@@ -1866,6 +1866,14 @@ impl UsageTree {
         }
         Ok(())
     }
+
+    pub fn build_visited_set(&self) -> HashSet<UInt256> {
+        let mut visited = HashSet::new();
+        for guard in self.visited.iter() {
+            visited.insert(guard.key().clone());
+        }
+        visited
+    }
 }
 
 mod slice;
