@@ -2,11 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.6
+
+- Enhanced hashmap filter split
+
 ## Version 2.0.5
 
 - Enhanced hashmap split by prefix
 - Enhanced hashmap merge in any place
-- Implemented hashmap filter split for one pass splitting like two hashmap filters
+- Implemented hashmap filter split in one pass like two hashmap filters
 
 ## Version 2.0.4
 
