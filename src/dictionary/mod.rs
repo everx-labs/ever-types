@@ -1313,8 +1313,13 @@ pub trait HashmapRemover: HashmapType + Clone + Sized {
     where F: FnMut(&BuilderData, SliceData) -> Result<HashmapFilterResult> {
         let bit_len = self.bit_len();
         let mut result = HashmapFilterResult::Accept;
-        filter_next::<Self, _>(self.data_mut(), &mut BuilderData::default(), bit_len, &mut result, &mut func)?;
-        self.after_remove()?;
+        if let Some(cell) = self.data() {
+            let (removed, res) = filter_next::<Self, _>(cell.clone(), BuilderData::default(), bit_len, &mut result, &mut func)?;
+            if removed {
+                *self.data_mut() = res.map(|res| res.cell);
+                self.after_remove()?;
+            }
+        }
         Ok(())
     }
     // splits hashmap in one pass with creating new one
@@ -1325,58 +1330,59 @@ pub trait HashmapRemover: HashmapType + Clone + Sized {
         let mut new_map = self.clone();
         let bit_len = self.bit_len();
         let mut result = HashmapFilterSplitResult::Stay;
-        filter_split_next::<Self, _>(self.data_mut(), new_map.data_mut(), &mut BuilderData::default(), bit_len, &mut result, &mut func)?;
-        self.after_remove()?;
-        new_map.after_remove()?;
+        if let Some(cell) = self.data() {
+            let (_, left, right) = filter_split_next::<Self, _>(cell.clone(), BuilderData::default(), bit_len, &mut result, &mut func)?;
+            *self.data_mut() = left.map(|res| res.cell);
+            self.after_remove()?;
+            *new_map.data_mut() = right.map(|res| res.cell);
+            new_map.after_remove()?;
+        }
         Ok(new_map)
     }
 }
 
 struct ForkComponent {
-    edge: Cell,
+    cell: Cell,
     key: BuilderData,
-    remainder: Option<SliceData>,
+    remainder: SliceData,
 }
 
-// we have the edge `cell_opt` which will be updated using some edges from `next`
-fn update_edge<T: HashmapType + ?Sized>(
-    cell_opt: &mut Option<Cell>, // edge to update
+/// make variable edge
+/// fork or edge or None using next array of edges
+fn make_var_edge<T: HashmapType + ?Sized>(
+    key: BuilderData, // current key for fork
     mut next: Vec<ForkComponent>, // new fork components or new edge
-    key: &mut BuilderData, // current key
     key_length: usize, // length of key on previous level
     bit_len: usize // current bit_len for making label
-) -> Result<Option<SliceData>> {
-    if let Some(ForkComponent { edge: right, key: new_key, remainder: next_remainder }) = next.pop() {
-        if let Some(ForkComponent { edge: left, key: _, remainder: _ }) = next.pop() { // prepare new fork
+) -> Result<Option<ForkComponent>> {
+    if let Some(ForkComponent { cell: right, key: new_key, remainder }) = next.pop() {
+        if let Some(ForkComponent { cell: left, key: _, remainder: _ }) = next.pop() { // prepare new fork
             let mut label = SliceData::load_builder(key.clone())?;
             label.move_by(key_length)?;
             let (builder, remainder) = T::make_fork(&label, bit_len, left, right, false)?;
-            *cell_opt = Some(builder.into_cell()?);
-            Ok(Some(remainder))
+            let cell = builder.into_cell()?;
+            Ok(Some(ForkComponent { cell, key, remainder }))
         } else { // replace fork with edge
-            *key = new_key;
+            let key = new_key;
             let mut label = SliceData::load_builder(key.clone())?;
             label.move_by(key_length)?;
             let mut builder = T::make_cell_with_label(label, bit_len)?;
-            if let Some(ref remainder) = next_remainder {
-                builder.checked_append_references_and_data(remainder)?;
-            }
-            *cell_opt = Some(builder.into_cell()?);
-            Ok(next_remainder)
+            builder.checked_append_references_and_data(&remainder)?;
+            let cell = builder.into_cell()?;
+            Ok(Some(ForkComponent { cell, key, remainder } ))
         }
     } else {
-        *cell_opt = None;
         Ok(None)
     }
 }
 
 fn filter_next<T, F>(
-    cell_opt: &mut Option<Cell>,
-    key: &mut BuilderData,
+    cell: Cell,
+    key: BuilderData,
     mut bit_len: usize,
     result: &mut HashmapFilterResult,
     func: &mut F,
-) -> Result<(bool, Option<SliceData>)> // is_removed and remainder
+) -> Result<(bool, Option<ForkComponent>)> // is_removed and remainder
 where
     T: HashmapType + ?Sized,
     F: FnMut(&BuilderData, SliceData) -> Result<HashmapFilterResult>
@@ -1384,22 +1390,15 @@ where
     if result == &HashmapFilterResult::Cancel || result == &HashmapFilterResult::Stop {
         return Ok((false, None))
     }
-    let mut cursor = match cell_opt {
-        None => { // it only for root
-            *result = HashmapFilterResult::Cancel;
-            return Ok((false, None))
-        }
-        Some(cell) => SliceData::load_cell_ref(cell)?,
-    };
+    let mut cursor = SliceData::load_cell(cell.clone())?;
     let key_length = key.length_in_bits();
     let this_bit_len = bit_len;
-    *key = cursor.get_label_raw(&mut bit_len, std::mem::take(key))?;
+    let key = cursor.get_label_raw(&mut bit_len, key)?;
     let remainder = cursor.clone();
     if bit_len == 0 {
-        let removed = match func(key, cursor)? {
+        let removed = match func(&key, cursor)? {
             HashmapFilterResult::Remove => {
-                *cell_opt = None;
-                true
+                return Ok((true, None))
             }
             HashmapFilterResult::Accept => false,
             new_result => {
@@ -1407,7 +1406,7 @@ where
                 false
             }
         };
-        return Ok((removed, Some(remainder)))
+        return Ok((removed, Some(ForkComponent { cell, key, remainder })))
     }
     let mut changed = false;
     bit_len -= 1;
@@ -1415,20 +1414,20 @@ where
     for i in 0..2 {
         let mut key = key.clone();
         key.append_bit_bool(i == 1)?;
-        let mut cell = Some(cursor.checked_drain_reference()?);
-        let (removed, remainder) = filter_next::<T, F>(&mut cell, &mut key, bit_len, result, func)?;
+        let cell = cursor.checked_drain_reference()?;
+        let (removed, remainder) = filter_next::<T, F>(cell, key, bit_len, result, func)?;
         if result == &HashmapFilterResult::Cancel {
             return Ok((false, None))
         }
         changed |= removed;
-        if let Some(edge) = cell {
-            next.push(ForkComponent { edge, key, remainder });
+        if let Some(remainder) = remainder {
+            next.push(remainder);
         }
     }
     if !changed {
-        Ok((false, Some(remainder)))
+        Ok((false, Some(ForkComponent { cell, key, remainder })))
     } else {
-        let remainder = update_edge::<T>(cell_opt, next, key, key_length, this_bit_len)?;
+        let remainder = make_var_edge::<T>(key, next, key_length, this_bit_len)?;
         Ok((true, remainder))
     }
 }
@@ -1438,13 +1437,12 @@ const SPLIT_RESULT_CHANGED_FIRST: u8 = 1;
 const SPLIT_RESULT_CHANGED_SECOND: u8 = 2;
 
 fn filter_split_next<T, F>(
-    cell1: &mut Option<Cell>,
-    cell2: &mut Option<Cell>,
-    key: &mut BuilderData,
+    cell: Cell,
+    key: BuilderData,
     mut bit_len: usize,
     result: &mut HashmapFilterSplitResult,
     func: &mut F,
-) -> Result<(u8, Option<SliceData>, Option<SliceData>)> // split result flag and remainders
+) -> Result<(u8, Option<ForkComponent>, Option<ForkComponent>)> // split result flag and remainders
 where
     T: HashmapType + ?Sized,
     F: FnMut(&BuilderData, SliceData) -> Result<HashmapFilterSplitResult>
@@ -1454,34 +1452,29 @@ where
         return Ok((0, None, None))
     }
     // load edge to slice or cancel operation if fail (it is only can be root case)
-    // cell1 and cell2 are always same on input
-    debug_assert_eq!(cell1, cell2);
-    let mut cursor = if let Some(cell) = cell1 {
-        SliceData::load_cell_ref(cell)?
-    } else { // it only for root
-        *result = HashmapFilterSplitResult::Cancel;
-        return Ok((0, None, None))
-    };
+    let mut cursor = SliceData::load_cell_ref(&cell)?;
     // current key length
     let key_length = key.length_in_bits();
     // store current maximum bit_len
     let this_bit_len = bit_len;
     // continue read key from label
-    *key = cursor.get_label_raw(&mut bit_len, std::mem::take(key))?;
+    let key = cursor.get_label_raw(&mut bit_len, key)?;
     let remainder = cursor.clone();
     // leaf found
     if bit_len == 0 {
         // analyze on client side and cut left or right
-        match func(key, cursor)? {
+        match func(&key, cursor)? {
             // item stay in original tree
             HashmapFilterSplitResult::Stay => {
-                *cell2 = None;
-                return Ok((SPLIT_RESULT_CHANGED_SECOND, Some(remainder), None))
+                // println!("stay with key: {:x}", SliceData::load_builder(key.clone())?);
+                let next = ForkComponent { cell, key, remainder };
+                return Ok((SPLIT_RESULT_CHANGED_SECOND, Some(next), None))
             }
             // item moved to the new tree
             HashmapFilterSplitResult::Move => {
-                *cell1 = None;
-                return Ok((SPLIT_RESULT_CHANGED_FIRST, None, Some(remainder)))
+                // println!("move with key: {:x}", SliceData::load_builder(key1.clone())?);
+                let next = ForkComponent { cell, key, remainder };
+                return Ok((SPLIT_RESULT_CHANGED_FIRST, None, Some(next)))
             }
             HashmapFilterSplitResult::Cancel => {
                 *result = HashmapFilterSplitResult::Cancel;
@@ -1496,28 +1489,32 @@ where
     for i in 0..2 {
         let mut key = key.clone();
         key.append_bit_bool(i == 1)?;
-        let mut cell1 = Some(cursor.checked_drain_reference()?);
-        let mut cell2 = cell1.clone();
+        let cell = cursor.checked_drain_reference()?;
         // after split we will receive new edges
-        let (this_split_result, remainder1, remainder2) = filter_split_next::<T, F>(&mut cell1, &mut cell2, &mut key, bit_len, result, func)?;
+        let (this_split_result, left, right) = filter_split_next::<T, F>(cell, key, bit_len, result, func)?;
         if result == &HashmapFilterSplitResult::Cancel {
             return Ok((SPLIT_RESULT_CHANGED_NONE, None, None))
         }
         split_result |= this_split_result;
-        if let Some(edge) = cell1 {
-            next1.push(ForkComponent { edge, key: key.clone(), remainder: remainder1 });
+        if let Some(left) = left {
+            next1.push(left);
         }
-        if let Some(edge) = cell2 {
-            next2.push(ForkComponent { edge, key, remainder: remainder2 });
+        if let Some(right) = right {
+            next2.push(right);
         }
     }
-    let remainder1 = if (split_result & SPLIT_RESULT_CHANGED_FIRST) != 0 {
-        update_edge::<T>(cell1, next1, key, key_length, this_bit_len)?
-    } else { Some(remainder.clone()) };
-    let remainder2 = if (split_result & SPLIT_RESULT_CHANGED_SECOND) != 0 {
-        update_edge::<T>(cell2, next2, key, key_length, this_bit_len)?
-    } else { Some(remainder) };
-    Ok((split_result, remainder1, remainder2))
+    // println!("edges split result {}: {}-{}", split_result, next1.len(), next2.len());
+    let left = if (split_result & SPLIT_RESULT_CHANGED_FIRST) != 0 {
+        make_var_edge::<T>(key.clone(), next1, key_length, this_bit_len)?
+    } else {
+        Some(ForkComponent {cell: cell.clone(), key: key.clone(), remainder: remainder.clone()})
+    };
+    let right = if (split_result & SPLIT_RESULT_CHANGED_SECOND) != 0 {
+        make_var_edge::<T>(key, next2, key_length, this_bit_len)?
+    } else {
+        Some(ForkComponent {cell, key, remainder})
+    };
+    Ok((split_result, left, right))
 }
 
 pub trait HashmapSubtree: HashmapType + Clone + Sized {
