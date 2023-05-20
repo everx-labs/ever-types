@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.7
+
+- Fixed panics after fuzzing
+
 ## Version 2.0.6
 
 - Enhanced hashmap filter split

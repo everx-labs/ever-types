@@ -970,6 +970,9 @@ fn check_cell_buf(buf: &[u8], unbounded: bool) -> Result<()> {
     }
 
     if is_big_cell(buf) {
+        if buf.len() < 4 {
+            fail!("Buffer is too small to read big cell's length (min 4 bytes)");
+        }
         let full_data_len = full_len(buf);
         if buf.len() < full_data_len {
             fail!("buf is too small ({}) to fit this big cell ({})", buf.len(), full_data_len);

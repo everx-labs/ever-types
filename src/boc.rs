@@ -850,7 +850,10 @@ impl<'a> BocReader<'a> {
         let mut data;
         let mut d1d2 = [0_u8; 2];
         src.read_exact(&mut d1d2[0..1])?;
-        if accept_big_cells && cell::is_big_cell(&d1d2[0..1]) {
+        if cell::is_big_cell(&d1d2[0..1]) {
+            if !accept_big_cells {
+                fail!("big cells are not allowed");
+            }
             let len = src.read_be_uint(3)? as usize;
             if len > MAX_BIG_DATA_BYTES {
                 fail!("big cell data length {} is too big", len);
