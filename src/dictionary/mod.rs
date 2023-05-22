@@ -1387,8 +1387,12 @@ where
     T: HashmapType + ?Sized,
     F: FnMut(&BuilderData, SliceData) -> Result<HashmapFilterResult>
 {
-    if result == &HashmapFilterResult::Cancel || result == &HashmapFilterResult::Stop {
-        return Ok((false, None))
+    if result == &HashmapFilterResult::Cancel {
+        return Ok((false, None));
+    }
+
+    if result == &HashmapFilterResult::Stop {
+        return Ok((false, Some(ForkComponent { cell, key, remainder: SliceData:: default() })));
     }
     let mut cursor = SliceData::load_cell(cell.clone())?;
     let key_length = key.length_in_bits();
