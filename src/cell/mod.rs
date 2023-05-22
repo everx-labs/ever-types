@@ -227,6 +227,7 @@ pub trait CellImpl: Sync + Send {
 pub struct Cell(Arc<dyn CellImpl>);
 
 lazy_static::lazy_static!{
+    static ref CELL_DEFAULT: Cell = Cell(Arc::new(DataCell::new()));
     static ref CELL_COUNT: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
     // static ref FINALIZATION_NANOS: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
 }
@@ -531,7 +532,7 @@ impl Deref for Cell {
 
 impl Default for Cell {
     fn default() -> Self {
-        Cell::with_cell_impl_arc(Arc::new(DataCell::new()))
+        CELL_DEFAULT.clone()
     }
 }
 

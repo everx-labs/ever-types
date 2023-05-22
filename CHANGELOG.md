@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.9
+
+- Optimize Cell::default()
+
 ## Version 2.0.8
 
 - Fixed bug in hashmap_filter function
