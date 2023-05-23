@@ -584,7 +584,7 @@ impl<'a> BocReader<'a> {
             index2 = Vec::with_capacity(header.cells_count);
             for _ in 0_usize..header.cells_count {
                 check_abort(self.abort)?;
-                index2.push(src.position() as u32);
+                index2.push(src.position());
                 Self::skip_cell(&mut src, header.ref_size)?;
             }
         } else if index.len() < header.cells_count * header.offset_size {
