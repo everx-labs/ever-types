@@ -2,8 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.11
+
+- Use SliceData as bitstring for hashmap key manipulation
 
 ## Version 2.0.10
+
 
 - Fixed BocReader::read_inmem for big bocs (> 4Gb)
 
