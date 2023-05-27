@@ -21,9 +21,17 @@ use crate::{error, fail, cell::{BuilderData, Cell, CellType, IBitstring, LevelMa
 use crate::types::{ExceptionCode, Result, UInt256};
 use smallvec::SmallVec;
 
+#[derive(Eq, PartialEq, Clone, Default)]
+enum InternalData {
+    #[default]
+    None,
+    Cell(Cell),
+    Data(SmallVec<[u8; 128]>, usize)
+}
+
 #[derive(Eq, Clone, Default)]
 pub struct SliceData {
-    pub(super) cell: Cell,
+    data: InternalData,
     data_window: Range<usize>,
     references_window: Range<usize>,
 }
@@ -57,8 +65,8 @@ impl Ord for SliceData {
 impl Hash for SliceData {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.get_bytestring(0).hash(state);
-        for i in self.references_window.clone() {
-            state.write(self.cell.reference(i).unwrap().repr_hash().as_slice());
+        for i in 0..self.remaining_references() {
+            state.write(self.reference(i).unwrap().repr_hash().as_slice());
         }
     }
 }
@@ -98,6 +106,7 @@ impl SliceData {
     }
 
     pub fn load_builder(builder: BuilderData) -> Result<SliceData> {
+        // SliceData::load_bitstring(builder)
         SliceData::load_cell(builder.into_cell()?)
     }
 
@@ -110,9 +119,33 @@ impl SliceData {
             Ok(SliceData {
                 references_window: 0..cell.references_count(),
                 data_window: 0..cell.bit_length(),
-                cell
+                data: InternalData::Cell(cell)
             })
         }
+    }
+
+    pub(super) fn with_bitstring(data: impl Into<SmallVec<[u8; 128]>>, length_in_bits: usize) -> Self {
+        Self {
+            data: InternalData::Data(data.into(), length_in_bits.min(super::MAX_DATA_BITS)),
+            references_window: 0..0,
+            data_window: 0..length_in_bits,
+        }
+    }
+
+    pub fn load_bitstring(builder: BuilderData) -> Result<SliceData> {
+        if builder.cell_type != CellType::Ordinary {
+            fail!("cell type should be ordinary but it is {}", builder.cell_type)
+        }
+        if builder.level_mask != LevelMask::default() {
+            fail!("should not have any level mask it has {}", builder.level_mask)
+        }
+        if builder.length_in_bits() > super::MAX_DATA_BITS {
+            fail!("length should be less or equal to {} but it is {}", super::MAX_DATA_BITS, builder.length_in_bits())
+        }
+        if builder.references_used() != 0 {
+            fail!("should not have any references but it has {}", builder.references_used())
+        }
+        Ok(builder.into_bitstring())
     }
 
     pub fn load_cell_ref(cell: &Cell) -> Result<SliceData> {
@@ -125,7 +158,7 @@ impl SliceData {
     }
 
     pub fn remaining_references(&self) -> usize {
-        if self.references_window.start > self.references_window.end {
+        if self.references_window.start >= self.references_window.end {
             return 0;
         }
         self.references_window.end - self.references_window.start
@@ -169,49 +202,65 @@ impl SliceData {
 
     /// shrinks references_window: range - subrange of current window, returns shrinked references
     pub fn shrink_references<T: RangeBounds<usize>>(&mut self, range: T) -> Vec<Cell> {
-        let refs_count = self.remaining_references();
-        let start = match range.start_bound() {
-            Bound::Included(start) => *start,
-            Bound::Excluded(start) => start + 1,
-            Bound::Unbounded => 0
-        };
-        let end = match range.end_bound() {
-            Bound::Included(end) => end + 1,
-            Bound::Excluded(end) => *end,
-            Bound::Unbounded => refs_count
-        };
-
         let mut vec = vec![];
-        if (start <= end) && (end <= refs_count) {
-            (0..start).for_each(|i| vec.push(self.reference(i).unwrap()));
-            (end..refs_count).for_each(|i| vec.push(self.reference(i).unwrap()));
-            self.references_window.end = self.references_window.start + end;
-            self.references_window.start += start;
+        if let InternalData::Cell(cell) = &self.data {
+            let refs_count = self.remaining_references();
+            let start = match range.start_bound() {
+                Bound::Included(start) => *start,
+                Bound::Excluded(start) => start + 1,
+                Bound::Unbounded => 0
+            };
+            let end = match range.end_bound() {
+                Bound::Included(end) => end + 1,
+                Bound::Excluded(end) => *end,
+                Bound::Unbounded => refs_count
+            };
+
+            if (start <= end) && (end <= refs_count) {
+                (0..start).for_each(|i| vec.push(cell.reference(i).unwrap()));
+                (end..refs_count).for_each(|i| vec.push(cell.reference(i).unwrap()));
+                self.references_window.end = self.references_window.start + end;
+                self.references_window.start += start;
+            }
         }
         vec
     }
 
-    pub fn remaining_data(&self) -> BuilderData {
+    fn remaining_data(self) -> (SmallVec<[u8; 128]>, usize) {
+        if self.data_window.start >= self.data_window.end {
+            return (SmallVec::new(), 0)
+        }
+        let data = match self.data {
+            InternalData::None => return (SmallVec::new(), 0),
+            InternalData::Data(data, length_in_bits) => {
+                if self.data_window.start == 0 && self.data_window.end == length_in_bits {
+                    return (data, length_in_bits);
+                }
+                data
+            }
+            InternalData::Cell(cell) => {
+                if self.references_window.start == 0 && self.data_window.start == 0
+                    && self.references_window.end == cell.references_count()
+                    && self.data_window.end == cell.bit_length() {
+                        return (SmallVec::from_slice(cell.data()), cell.bit_length())
+                }
+                SmallVec::from_slice(cell.data())
+            }
+        };
+        let length_in_bits = self.data_window.end - self.data_window.start;
         let start = self.data_window.start / 8;
         let end = (self.data_window.end + 7) / 8;
-        if self.data_window.start >= self.data_window.end {
-            return BuilderData::new()
-        }
         let trailing = self.data_window.start % 8;
         if trailing == 0 {
-            BuilderData::with_raw(
-                SmallVec::from_slice(&self.cell.data()[start..end]),
-                self.remaining_bits()
-            ).unwrap()
-        } else if trailing + self.remaining_bits() <= 8 {
-            let vec = vec![self.cell.data()[start] << trailing];
-            BuilderData::with_raw(vec, self.remaining_bits()).unwrap()
-        } else {
-            let vec = vec![self.cell.data()[start] << trailing];
-            let mut builder = BuilderData::with_raw(vec, 8 - trailing).unwrap();
-            builder.append_raw(& self.cell.data()[start + 1..end], trailing + self.remaining_bits() - 8).unwrap();
-            builder
+            return (SmallVec::from_slice(&data[start..end]), length_in_bits);
         }
+        let mut vec = SmallVec::from_slice(&[data[start] << trailing]);
+        if trailing + length_in_bits > 8 {
+            let mut new_length = 8 - trailing;
+            let bits = length_in_bits - new_length;
+            BuilderData::append_raw_data(&mut vec, &mut new_length, &data[start + 1..end], bits).unwrap();
+        }
+        (vec, length_in_bits)
     }
 
     pub fn shrink_by_remainder(&mut self, other: &SliceData) {
@@ -233,51 +282,94 @@ impl SliceData {
     }
 
     pub fn reference(&self, i: usize) -> Result<Cell> {
-        Ok(self.reference_opt(i).ok_or(ExceptionCode::CellUnderflow)?)
+        if self.references_window.start + i < self.references_window.end {
+            if let InternalData::Cell(cell) = &self.data {
+                return cell.reference(self.references_window.start + i)
+            }
+        }
+        fail!(ExceptionCode::CellUnderflow)
     }
 
     pub fn reference_opt(&self, i: usize) -> Option<Cell> {
         if self.references_window.start + i < self.references_window.end {
-            self.cell.reference(self.references_window.start + i).ok()
-        } else {
-            None
+            if let InternalData::Cell(cell) = &self.data {
+                return cell.reference(self.references_window.start + i).ok()
+            }
         }
+        None
     }
 
     pub fn storage(&self) -> &[u8] {
-        self.cell.data()
+        match &self.data {
+            InternalData::None => &[],
+            InternalData::Data(data, _length_in_bits) => data,
+            InternalData::Cell(cell) => cell.data()
+        }
     }
     /// returns internal cell regardless window settings
+    #[deprecated]
     pub fn cell(&self) -> &Cell {
-        &self.cell
+        match &self.data {
+            InternalData::Cell(cell) => cell,
+            _ => &crate::CELL_DEFAULT
+        }
+    }
+    /// returns internal cell regardless window settings
+    pub fn cell_opt(&self) -> Option<&Cell> {
+        match &self.data {
+            InternalData::Cell(cell) => Some(cell),
+            _ => None
+        }
     }
     /// constructs new cell trunking original regarding window settings
     pub fn into_cell(self) -> Cell {
-        if self.references_window.start == 0 && self.data_window.start == 0
-            && self.references_window.end == self.cell.references_count()
-            && self.data_window.end == self.cell.bit_length() {
-            self.cell
-        } else {
-            BuilderData::from_slice(&self).into_cell().expect("it must not fail because builder made from cell cut by slice")
+        match &self.data {
+            InternalData::None => return Cell::default(),
+            InternalData::Cell(cell) => {
+                if self.data_window.start == 0
+                    && self.data_window.end == cell.bit_length()
+                    && self.references_window.start == 0
+                    && self.references_window.end == cell.references_count() {
+                    return cell.clone();
+                }
+            }
+            _ => ()
         }
+        self.into_builder().into_cell().unwrap()
+    }
+    /// constructs builder trunking original cell regarding window settings
+    pub fn into_builder(self) -> BuilderData {
+        let cell_type = self.cell_type();
+        let level_mask = self.level_mask();
+        let slice = &self;
+        let refs: SmallVec<[Cell; 4]> = (0..self.remaining_references()).map(|index| slice.reference(index).unwrap()).collect::<SmallVec<_>>();
+        let (data, length_in_bits) = self.remaining_data();
+        let mut builder = BuilderData::with_raw_and_refs(data, length_in_bits, refs).unwrap();
+        builder.cell_type = cell_type;
+        builder.level_mask = level_mask;
+        builder
+    }
+
+    pub fn as_builder(&self) -> BuilderData {
+        self.clone().into_builder()
     }
 
     pub fn checked_drain_reference(&mut self) -> Result<Cell> {
-        if self.remaining_references() != 0 {
-            Ok(self.drain_reference())
-        } else {
-            fail!(ExceptionCode::CellUnderflow)
+        if let InternalData::Cell(cell) = &self.data {
+            if self.references_window.start < self.references_window.end {
+                self.references_window.start += 1;
+                return cell.reference(self.references_window.start - 1);
+            }
         }
-    }
-    fn drain_reference(&mut self) -> Cell {
-        self.references_window.start += 1;
-        self.cell.reference(self.references_window.start - 1).unwrap()
+        fail!(ExceptionCode::CellUnderflow)
     }
 
     pub fn get_references(&self) -> Range<usize> {
         self.references_window.clone()
     }
 
+    // TBD: remove using in TVM first
+    #[deprecated]
     pub fn undrain_reference(&mut self) {
         if self.references_window.start > 0 {
             self.references_window.start -= 1;
@@ -302,7 +394,7 @@ impl SliceData {
             let index = self.data_window.start + offset;
             let q = index / 8;
             let r = index % 8;
-            Some((self.cell.data()[q] >> (7 - r) & 1) != 0)
+            Some((self.storage()[q] >> (7 - r) & 1) != 0)
         }
     }
 
@@ -321,16 +413,16 @@ impl SliceData {
         let q = index / 8;
         let r = index % 8;
         if r == 0 {
-            Ok(self.cell.data()[q] >> (8 - r - bits))
+            Ok(self.storage()[q] >> (8 - r - bits))
         } else if bits <= (8 - r) {
-            Ok(self.cell.data()[q] >> (8 - r - bits) & ((1 << bits) - 1))
+            Ok(self.storage()[q] >> (8 - r - bits) & ((1 << bits) - 1))
         } else {
             let mut ret = 0u16;
-            if q < self.cell.data().len() {
-                ret |= (self.cell.data()[q] as u16) << 8;
+            if q < self.storage().len() {
+                ret |= (self.storage()[q] as u16) << 8;
             }
-            if q < self.cell.data().len() - 1 {
-                ret |= self.cell.data()[q + 1] as u16;
+            if q < self.storage().len() - 1 {
+                ret |= self.storage()[q + 1] as u16;
             }
             Ok((ret >> (8 - r)) as u8 >> (8 - bits))
         }
@@ -607,6 +699,7 @@ impl SliceData {
         )
     }
 
+    // TBD
     pub fn overwrite_prefix(&mut self, prefix: &SliceData) -> Result<()> {
         if prefix.is_empty() {
             Ok(())
@@ -614,7 +707,7 @@ impl SliceData {
         } else if self.remaining_bits() < prefix.remaining_bits() {
             fail!("Prefix should be fully in self")
         } else {
-            let mut builder = BuilderData::from_slice(prefix);
+            let mut builder = prefix.as_builder();
             self.move_by(prefix.remaining_bits())?;
             builder.append_bytestring(self)?;
             *self = SliceData::load_builder(builder)?;
@@ -623,33 +716,62 @@ impl SliceData {
     }
 
     pub fn cell_type(&self) -> CellType {
-        self.cell.cell_type()
+        match &self.data {
+            InternalData::Cell(cell) => cell.cell_type(),
+            _ => Default::default()
+        }
     }
     pub fn level(&self) -> u8 {
-        self.cell.level()
+        match &self.data {
+            InternalData::Cell(cell) => cell.level(),
+            _ => Default::default()
+        }
     }
     pub fn level_mask(&self) -> LevelMask {
-        self.cell.level_mask()
+        match &self.data {
+            InternalData::Cell(cell) => cell.level_mask(),
+            _ => Default::default()
+        }
     }
 
     /// Returns cell's higher hash for given index (last one - representation hash)
     pub fn hash(&self, index: usize) -> UInt256 {
-        Cell::hash(&self.cell, index)
+        match &self.data {
+            InternalData::Cell(cell) => Cell::hash(cell, index),
+            _ => Default::default()
+        }
+    }
+
+    /// Returns cell's representation hash
+    pub fn repr_hash(&self) -> UInt256 {
+        match &self.data {
+            InternalData::Cell(cell) => cell.repr_hash(),
+            _ => Default::default()
+        }
     }
 
     /// Returns cell's depth for given index
     pub fn depth(&self, index: usize) -> u16 {
-        self.cell.depth(index)
+        match &self.data {
+            InternalData::Cell(cell) => cell.depth(index),
+            _ => Default::default()
+        }
     }
 
     /// Returns cell's hashes (representation and highers)
     pub fn hashes(&self) -> Vec<UInt256> {
-        self.cell.hashes()
+        match &self.data {
+            InternalData::Cell(cell) => cell.hashes(),
+            _ => Default::default()
+        }
     }
 
     /// Returns cell's depth (for current state and each level)
     pub fn depths(&self) -> Vec<u16> {
-        self.cell.depths()
+        match &self.data {
+            InternalData::Cell(cell) => cell.depths(),
+            _ => Default::default()
+        }
     }
 
     // #[deprecated]
@@ -663,11 +785,6 @@ impl SliceData {
         super::to_hex_string(data.as_slice(), len, true)
     }
 
-    pub fn is_full_cell_slice(&self) -> bool {
-        self.data_window.start == 0 && 
-        self.data_window.end == self.cell.bit_length() &&
-        self.remaining_references() == self.cell.references_count()
-    }
 }
 
 /// subject to move to tests
@@ -686,7 +803,7 @@ impl SliceData {
     }
 
     pub fn append_reference(&mut self, other: SliceData) -> &mut SliceData {
-        let mut builder = BuilderData::from_slice(self);
+        let mut builder = self.as_builder();
         builder.checked_append_reference(other.into_cell()).unwrap();
         *self = SliceData::load_builder(builder).expect("it should be used only in tests");
         self
@@ -706,13 +823,18 @@ impl fmt::Debug for SliceData {
 #[rustfmt::skip]
 impl fmt::Display for SliceData {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "data: {}..{}, references: {}..{}, data slice:{}, cell:{}", 
-                self.data_window.start,
-                self.data_window.end,
-                self.references_window.start,
-                self.references_window.end,
-                hex::encode(self.get_bytestring(0)),
-                self.cell)
+        write!(f, "data: {}..{}, references: {}..{}, data slice:{}", 
+            self.data_window.start,
+            self.data_window.end,
+            self.references_window.start,
+            self.references_window.end,
+            hex::encode(self.get_bytestring(0)),
+        )?;
+        match &self.data {
+            InternalData::None => writeln!(f, "cell: empty"),
+            InternalData::Cell(cell) => writeln!(f, "cell: {}", cell),
+            InternalData::Data(data, length_in_bits, ) => writeln!(f, "cell: {} - {length_in_bits}", hex::encode(data)),
+        }
     }
 }
 

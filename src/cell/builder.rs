@@ -17,8 +17,8 @@ use std::fmt;
 use smallvec::SmallVec;
 
 use crate::cell::{
-    append_tag, find_tag, Cell, CellType, DataCell, LevelMask, SliceData,
-    MAX_DATA_BITS, MAX_SAFE_DEPTH,
+    append_tag, find_tag, Cell, CellType, DataCell, LevelMask, SliceData, MAX_DATA_BITS,
+    MAX_SAFE_DEPTH,
 };
 use crate::types::{ExceptionCode, Result};
 use crate::{error, fail};
@@ -29,13 +29,15 @@ const EXACT_CAPACITY: usize = 128;
 pub struct BuilderData {
     data: SmallVec<[u8; 128]>,
     length_in_bits: usize,
-    references: SmallVec<[Cell; 4]>,
-    cell_type: CellType,
-    level_mask: LevelMask,
+    pub(super) references: SmallVec<[Cell; 4]>,
+    pub(super) cell_type: CellType,
+    pub(super) level_mask: LevelMask,
 }
 
 impl BuilderData {
-    pub const fn default() -> Self { Self::new() }
+    pub const fn default() -> Self {
+        Self::new()
+    }
     pub const fn new() -> Self {
         BuilderData {
             data: SmallVec::new_const(),
@@ -46,7 +48,10 @@ impl BuilderData {
         }
     }
 
-    pub fn with_raw(data: impl Into<SmallVec<[u8; 128]>>, length_in_bits: usize) -> Result<BuilderData> {
+    pub fn with_raw(
+        data: impl Into<SmallVec<[u8; 128]>>,
+        length_in_bits: usize,
+    ) -> Result<BuilderData> {
         let mut data = data.into();
         if length_in_bits > data.len() * 8 {
             fail!(ExceptionCode::FatalError)
@@ -72,14 +77,13 @@ impl BuilderData {
         })
     }
 
-    pub fn with_raw_and_refs<TRefs>(data: impl Into<SmallVec<[u8; 128]>>, length_in_bits: usize, refs: TRefs) -> Result<BuilderData>
-    where
-        TRefs: IntoIterator<Item = Cell>
-    {
+    pub fn with_raw_and_refs(
+        data: impl Into<SmallVec<[u8; 128]>>,
+        length_in_bits: usize,
+        refs: impl IntoIterator<Item = Cell>,
+    ) -> Result<BuilderData> {
         let mut builder = BuilderData::with_raw(data, length_in_bits)?;
-        for value in refs.into_iter() {
-            builder.checked_append_reference(value)?;
-        }
+        builder.references = refs.into_iter().collect();
         Ok(builder)
     }
 
@@ -98,8 +102,15 @@ impl BuilderData {
     }
 
     /// finalize cell with default max depth
-    pub fn into_cell(self) -> Result<Cell> { self.finalize(MAX_SAFE_DEPTH) }
+    pub fn into_cell(self) -> Result<Cell> {
+        self.finalize(MAX_SAFE_DEPTH)
+    }
 
+    /// loads builder as bitstring to slice
+    /// maximum length 1023 bits, type must be Ordinary, no references
+    pub(super) fn into_bitstring(self) -> SliceData {
+        SliceData::with_bitstring(self.data, self.length_in_bits)
+    }
     /// use max_depth to limit depth
     pub fn finalize(mut self, max_depth: u16) -> Result<Cell> {
         if self.cell_type == CellType::Big {
@@ -114,17 +125,15 @@ impl BuilderData {
         }
         append_tag(&mut self.data, self.length_in_bits);
 
-        Ok(Cell::with_cell_impl(
-            DataCell::with_params(
-                self.references.to_vec(),
-                &self.data,
-                self.cell_type,
-                self.level_mask.mask(),
-                Some(max_depth),
-                None,
-                None,
-            )?
-        ))
+        Ok(Cell::with_cell_impl(DataCell::with_params(
+            self.references.to_vec(),
+            &self.data,
+            self.cell_type,
+            self.level_mask.mask(),
+            Some(max_depth),
+            None,
+            None,
+        )?))
     }
 
     pub fn references(&self) -> &[Cell] {
@@ -135,18 +144,17 @@ impl BuilderData {
         &self.data
     }
 
-    // TODO: refactor it compare directly in BuilderData
     pub fn compare_data(&self, other: &Self) -> Result<(Option<usize>, Option<usize>)> {
         if self == other {
-            return Ok((None, None))
+            return Ok((None, None));
         }
-        let label1 = SliceData::load_builder(self.clone())?;
-        let label2 = SliceData::load_builder(other.clone())?;
+        let label1 = SliceData::load_bitstring(self.clone())?;
+        let label2 = SliceData::load_bitstring(other.clone())?;
         let (_prefix, rem1, rem2) = SliceData::common_prefix(&label1, &label2);
         // unwraps are safe because common_prefix returns None if slice is empty
         Ok((
             rem1.map(|rem| rem.get_bit(0).expect("check common_prefix function") as usize),
-            rem2.map(|rem| rem.get_bit(0).expect("check common_prefix function") as usize)
+            rem2.map(|rem| rem.get_bit(0).expect("check common_prefix function") as usize),
         ))
     }
 
@@ -154,27 +162,17 @@ impl BuilderData {
         if cell.cell_type() == CellType::Big {
             fail!("Can't create a builder from a big cell");
         }
-        let mut builder = BuilderData::with_raw(
-                SmallVec::from_slice(cell.data()),
-                cell.bit_length()
-        )?;
+        let data = SmallVec::from_slice(cell.data());
+        let mut builder = BuilderData::with_raw(data, cell.bit_length())?;
         builder.references = cell.clone_references();
         builder.cell_type = cell.cell_type();
         builder.level_mask = cell.level_mask();
         Ok(builder)
     }
 
+    #[deprecated]
     pub fn from_slice(slice: &SliceData) -> BuilderData {
-        let refs_count = slice.remaining_references();
-        let references = (0..refs_count)
-            .map(|i| slice.reference(i).unwrap())
-            .collect::<SmallVec<_>>();
-        
-        let mut builder = slice.remaining_data();
-        builder.references = references;
-        builder.cell_type = slice.cell_type();
-        builder.level_mask = slice.level_mask();
-        builder
+        slice.as_builder()
     }
 
     pub fn length_in_bits(&self) -> usize {
@@ -196,74 +194,100 @@ impl BuilderData {
     }
 
     pub fn append_raw(&mut self, slice: &[u8], bits: usize) -> Result<&mut Self> {
-        if slice.len() * 8 < bits {
-            fail!(ExceptionCode::FatalError)
-        } else if (self.length_in_bits() + bits) > BuilderData::bits_capacity() {
-            fail!(ExceptionCode::CellOverflow)
-        } else if bits != 0 {
-            if (self.length_in_bits() % 8) == 0 {
-                if (bits % 8) == 0 {
-                    self.append_without_shifting(slice, bits);
-                } else {
-                    self.append_with_slice_shifting(slice, bits);
-                }
-            } else {
-                self.append_with_double_shifting(slice, bits);
-            }
-        }
-        assert!(self.length_in_bits() <= BuilderData::bits_capacity());
-        assert!(self.data().len() * 8 <= BuilderData::bits_capacity() + 1);
+        Self::append_raw_data(&mut self.data, &mut self.length_in_bits, slice, bits)?;
         Ok(self)
     }
 
-    fn append_without_shifting(&mut self, slice: &[u8], bits: usize) {
-        assert_eq!(bits % 8, 0);
-        assert_eq!(self.length_in_bits() % 8, 0);
-
-        self.data.truncate(self.length_in_bits / 8);
-        self.data.extend(slice.iter().copied());
-        self.length_in_bits += bits;
-        self.data.truncate(self.length_in_bits / 8);
+    // TODO: move it to builder operations to bitstring
+    pub(super) fn append_raw_data(
+        data: &mut SmallVec<[u8; 128]>,
+        length_in_bits: &mut usize,
+        slice: &[u8],
+        bits: usize,
+    ) -> Result<()> {
+        if slice.len() * 8 < bits {
+            fail!(ExceptionCode::FatalError)
+        } else if (*length_in_bits + bits) > BuilderData::bits_capacity() {
+            fail!(ExceptionCode::CellOverflow)
+        } else if bits != 0 {
+            if (*length_in_bits % 8) == 0 {
+                if (bits % 8) == 0 {
+                    Self::append_without_shift(data, length_in_bits, slice, bits);
+                } else {
+                    Self::append_with_shift(data, length_in_bits, slice, bits);
+                }
+            } else {
+                Self::append_with_double_shift(data, length_in_bits, slice, bits);
+            }
+        }
+        assert!(*length_in_bits <= BuilderData::bits_capacity());
+        assert!(data.len() * 8 <= BuilderData::bits_capacity() + 1);
+        Ok(())
     }
 
-    fn append_with_slice_shifting(&mut self, slice: &[u8], bits: usize) {
-        assert!(bits % 8 != 0);
-        assert_eq!(self.length_in_bits() % 8, 0);
+    fn append_without_shift(
+        data: &mut SmallVec<[u8; 128]>,
+        length_in_bits: &mut usize,
+        slice: &[u8],
+        bits: usize,
+    ) {
+        assert_eq!(bits % 8, 0);
+        assert_eq!(*length_in_bits % 8, 0);
 
-        self.data.truncate(self.length_in_bits / 8);
-        self.data.extend(slice.iter().copied());
-        self.length_in_bits += bits;
-        self.data.truncate(1 + self.length_in_bits / 8);
+        data.truncate(*length_in_bits / 8);
+        data.extend(slice.iter().copied());
+        *length_in_bits += bits;
+        data.truncate(*length_in_bits / 8);
+    }
+
+    fn append_with_shift(
+        data: &mut SmallVec<[u8; 128]>,
+        length_in_bits: &mut usize,
+        slice: &[u8],
+        bits: usize,
+    ) {
+        assert!(bits % 8 != 0);
+        assert_eq!(*length_in_bits % 8, 0);
+
+        data.truncate(*length_in_bits / 8);
+        data.extend(slice.iter().copied());
+        *length_in_bits += bits;
+        data.truncate(1 + *length_in_bits / 8);
 
         let slice_shift = bits % 8;
-        let mut last_byte = self.data.pop().expect("Empty slice going to another way");
+        let mut last_byte = data.pop().expect("Empty slice going to another way");
         last_byte >>= 8 - slice_shift;
         last_byte <<= 8 - slice_shift;
-        self.data.push(last_byte);
+        data.push(last_byte);
     }
 
-    fn append_with_double_shifting(&mut self, slice: &[u8], bits: usize) {
-        let self_shift = self.length_in_bits % 8;
-        self.data.truncate(1 + self.length_in_bits / 8);
-        self.length_in_bits += bits;
+    fn append_with_double_shift(
+        data: &mut SmallVec<[u8; 128]>,
+        length_in_bits: &mut usize,
+        slice: &[u8],
+        bits: usize,
+    ) {
+        let self_shift = *length_in_bits % 8;
+        data.truncate(1 + *length_in_bits / 8);
+        *length_in_bits += bits;
 
-        let last_bits = self.data.pop().unwrap() >> (8 - self_shift);
+        let last_bits = data.pop().unwrap() >> (8 - self_shift);
         let mut y: u16 = last_bits.into();
         for x in slice.iter() {
             y = (y << 8) | (*x as u16);
-            self.data.push((y >> self_shift) as u8);
+            data.push((y >> self_shift) as u8);
         }
-        self.data.push((y << (8 - self_shift)) as u8);
+        data.push((y << (8 - self_shift)) as u8);
 
-        let shift = self.length_in_bits % 8;
+        let shift = *length_in_bits % 8;
         if shift == 0 {
-            self.data.truncate(self.length_in_bits / 8);
+            data.truncate(*length_in_bits / 8);
         } else {
-            self.data.truncate(self.length_in_bits / 8 + 1);
-            let mut last_byte = self.data.pop().unwrap();
+            data.truncate(*length_in_bits / 8 + 1);
+            let mut last_byte = data.pop().unwrap();
             last_byte >>= 8 - shift;
             last_byte <<= 8 - shift;
-            self.data.push(last_byte);
+            data.push(last_byte);
         }
     }
 
@@ -285,7 +309,7 @@ impl BuilderData {
         } else {
             self.references.push(cell);
             Ok(self)
-        }  
+        }
     }
 
     pub fn checked_prepend_reference(&mut self, cell: Cell) -> Result<&mut Self> {
@@ -299,21 +323,24 @@ impl BuilderData {
 
     pub fn replace_data(&mut self, data: impl Into<SmallVec<[u8; 128]>>, length_in_bits: usize) {
         let data = data.into();
-        self.length_in_bits = std::cmp::min(std::cmp::min(length_in_bits, MAX_DATA_BITS), data.len() * 8);
+        self.length_in_bits = length_in_bits.min(MAX_DATA_BITS).min(data.len() * 8);
         self.data = data;
     }
 
     pub fn replace_reference_cell(&mut self, index: usize, child: Cell) {
         match self.references.get_mut(index) {
             None => {
-                log::error!("replacing not existed cell by index {} with cell hash {:x}", index, child.repr_hash());
+                log::error!(
+                    "replacing not existed cell by index {} with cell hash {:x}",
+                    index,
+                    child.repr_hash()
+                );
             }
-            Some(old) => *old = child
+            Some(old) => *old = child,
         }
     }
 
     pub fn set_type(&mut self, cell_type: CellType) {
-
         // TODO: big cells ?
 
         self.cell_type = cell_type;
@@ -342,7 +369,13 @@ impl BuilderData {
 
 impl fmt::Display for BuilderData {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "data: {} len: {} reference count: {}", hex::encode(&self.data), self.length_in_bits, self.references.len())
+        write!(
+            f,
+            "data: {} len: {} reference count: {}",
+            hex::encode(&self.data),
+            self.length_in_bits,
+            self.references.len()
+        )
     }
 }
 

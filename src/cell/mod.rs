@@ -223,11 +223,10 @@ pub trait CellImpl: Sync + Send {
     fn virtualization(&self) -> u8 { 0 }
 }
 
-//#[derive(Clone)]
 pub struct Cell(Arc<dyn CellImpl>);
 
 lazy_static::lazy_static!{
-    static ref CELL_DEFAULT: Cell = Cell(Arc::new(DataCell::new()));
+    pub(crate) static ref CELL_DEFAULT: Cell = Cell(Arc::new(DataCell::new()));
     static ref CELL_COUNT: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
     // static ref FINALIZATION_NANOS: Arc<AtomicU64> = Arc::new(AtomicU64::new(0));
 }
