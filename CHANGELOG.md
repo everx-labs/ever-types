@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.12
+
+- Refactor LabelReader for perfomance
+- Use load_bitstring for performance
+
 ## Version 2.0.11
 
 - Use SliceData as bitstring for hashmap key manipulation

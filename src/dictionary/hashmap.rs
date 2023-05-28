@@ -63,7 +63,7 @@ impl HashmapE {
     /// deserialize not empty root
     pub fn read_hashmap_root(&mut self, slice: &mut SliceData) -> Result<()> {
         let mut root = slice.clone();
-        let label = slice.get_label(self.bit_len)?;
+        let label = LabelReader::read_label(slice, self.bit_len)?;
         if label.remaining_bits() != self.bit_len {
             slice.shrink_references(2..);
             root.shrink_by_remainder(slice);
