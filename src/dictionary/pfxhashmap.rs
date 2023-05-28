@@ -13,7 +13,7 @@
 
 use std::fmt;
 
-use crate::GasConsumer;
+use crate::{GasConsumer, LabelReader};
 use crate::types::Result;
 
 use super::{ADD, HashmapRemover, HashmapType, hm_label, Leaf, REPLACE};
@@ -94,7 +94,7 @@ impl PfxHashmapE {
             Some(root) if !key.is_empty() => SliceData::load_cell_ref(root)?,
             _ => return Ok(false)
         };
-        let mut label = cursor.get_label(bit_len)?;
+        let mut label = LabelReader::read_label(&mut cursor, bit_len)?;
         loop {
             match SliceData::common_prefix(&label, &key) {
                 (_, None, None) => (), // label == key
@@ -113,7 +113,7 @@ impl PfxHashmapE {
             }
             cursor = SliceData::load_cell(cursor.reference(next_index)?)?;
             bit_len -= label.remaining_bits() + 1;
-            label = cursor.get_label(bit_len)?;
+            label = LabelReader::read_label(&mut cursor, bit_len)?;
         }
     }
     /// finds item in PfxHashmap which key is prefix of key and returns value with path and suffix
@@ -124,32 +124,32 @@ impl PfxHashmapE {
             _ => return Ok((SliceData::default(), None, key))
         };
         let mut path =  BuilderData::default();
-        let mut label = cursor.get_label(bit_len)?;
+        let mut label = LabelReader::read_label(&mut cursor, bit_len)?;
         loop {
-            path.checked_append_references_and_data(&label)?;
+            path.append_bytestring(&label)?;
             match SliceData::common_prefix(&label, &key) {
                 (_, None, None) => { // label == key
                     key.shrink_data(..0);
                 }
                 (_, None, Some(remainder)) => key = remainder, // usual case
-                (_, _, None) => return Ok((SliceData::load_builder(path)?, None, SliceData::default())), // key is prefix
-                (_, Some(_), Some(remainder)) => return Ok((SliceData::load_builder(path)?, None, remainder))
+                (_, _, None) => return Ok((SliceData::load_bitstring(path)?, None, SliceData::default())), // key is prefix
+                (_, Some(_), Some(remainder)) => return Ok((SliceData::load_bitstring(path)?, None, remainder))
             }
             if Self::is_leaf(&mut cursor) {
-                return Ok((SliceData::load_builder(path)?, Some(cursor), key))
+                return Ok((SliceData::load_bitstring(path)?, Some(cursor), key))
             } else if key.is_empty() {
-                return Ok((SliceData::load_builder(path)?, None, key))
+                return Ok((SliceData::load_bitstring(path)?, None, key))
             }
             let next_index = key.get_next_bit_int()?;
             if next_index >= cursor.remaining_references()
                 || bit_len < label.remaining_bits() + 1 {
                 debug_assert!(false);
-                return Ok((SliceData::load_builder(path)?, None, key)) // problem
+                return Ok((SliceData::load_bitstring(path)?, None, key)) // problem
             }
             path.append_bit_bool(next_index == 1)?;
             cursor = gas_consumer.load_cell(cursor.reference(next_index)?)?;
             bit_len -= label.remaining_bits() + 1;
-            label = cursor.get_label(bit_len)?;
+            label = LabelReader::read_label(&mut cursor, bit_len)?;
         }
     }
     #[allow(dead_code)]
@@ -160,7 +160,7 @@ impl PfxHashmapE {
             _ => return Ok((SliceData::default(), None, key))
         };
         let mut path = BuilderData::default();
-        let mut label = cursor.get_label(bit_len)?;
+        let mut label = LabelReader::read_label(&mut cursor, bit_len)?;
         loop {
             path.checked_append_references_and_data(&label)?;
             match SliceData::common_prefix(&label, &key) {
@@ -169,38 +169,38 @@ impl PfxHashmapE {
                 }
                 (_, None, Some(remainder)) => key = remainder, // usual case
                 (_, _, None) => break, // key is prefix
-                (_, Some(_), Some(remainder)) => return Ok((SliceData::load_builder(path)?, None, remainder))
+                (_, Some(_), Some(remainder)) => return Ok((SliceData::load_bitstring(path)?, None, remainder))
             }
             if Self::is_leaf(&mut cursor) {
-                return Ok((SliceData::load_builder(path)?, Some(cursor), key))
+                return Ok((SliceData::load_bitstring(path)?, Some(cursor), key))
             }
             let next_index = key.get_next_bit_int()?;
             if next_index >= cursor.remaining_references()
                 || bit_len < label.remaining_bits() + 1 {
                 debug_assert!(false);
-                return Ok((SliceData::load_builder(path)?, None, key)) // problem
+                return Ok((SliceData::load_bitstring(path)?, None, key)) // problem
             }
             path.append_bit_bool(next_index == 1)?;
             cursor = SliceData::load_cell(cursor.reference(next_index)?)?;
             bit_len -= label.remaining_bits() + 1;
-            label = cursor.get_label(bit_len)?;
+            label = LabelReader::read_label(&mut cursor, bit_len)?;
         }
         key = SliceData::default();
         loop {
             if Self::is_leaf(&mut cursor) {
-                return Ok((SliceData::load_builder(path)?, Some(cursor), key))
+                return Ok((SliceData::load_bitstring(path)?, Some(cursor), key))
             }
             let next_index = 0;
             if next_index >= cursor.remaining_references() {
-                return Ok((SliceData::load_builder(path)?, None, key)) // problem
+                return Ok((SliceData::load_bitstring(path)?, None, key)) // problem
             }
             path.append_bit_bool(next_index == 1)?;
             cursor = SliceData::load_cell(cursor.reference(next_index)?)?;
             if bit_len < label.remaining_bits() + 1 {
-                return Ok((SliceData::load_builder(path)?, None, key)) // problem
+                return Ok((SliceData::load_bitstring(path)?, None, key)) // problem
             }
             bit_len -= label.remaining_bits() + 1;
-            label = cursor.get_label(bit_len)?;
+            label = LabelReader::read_label(&mut cursor, bit_len)?;
             path.checked_append_references_and_data(&label)?;
         }
     }

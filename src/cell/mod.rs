@@ -1578,7 +1578,7 @@ impl DataCell {
                     depth = max(depth, child_depth + 1);
                     let max_depth = max_depth.unwrap_or(MAX_DEPTH);
                     if depth > max_depth {
-                        fail!("fail creating cell: depth {} > {}", depth, std::cmp::min(max_depth, MAX_DEPTH))
+                        fail!("fail creating cell: depth {} > {}", depth, max_depth.min(MAX_DEPTH))
                     }
                     hasher.update(child_depth.to_be_bytes());
                 }

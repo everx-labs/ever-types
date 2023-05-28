@@ -101,12 +101,15 @@ impl PartialEq for SliceData {
 }
 
 impl SliceData {
-    pub fn new_empty() -> SliceData {
-        SliceData::default()
+    pub const fn new_empty() -> SliceData {
+        Self {
+            data: InternalData::None,
+            data_window: 0..0,
+            references_window: 0..0,
+        }
     }
 
     pub fn load_builder(builder: BuilderData) -> Result<SliceData> {
-        // SliceData::load_bitstring(builder)
         SliceData::load_cell(builder.into_cell()?)
     }
 
@@ -154,7 +157,7 @@ impl SliceData {
 
     pub fn from_string(value: &str) -> Result<SliceData> {
         let vec = parse_slice_base(value, 0, 16).ok_or_else(|| error!(ExceptionCode::FatalError))?;
-        SliceData::load_builder(BuilderData::with_bitstring(vec)?)
+        SliceData::load_bitstring(BuilderData::with_bitstring(vec)?)
     }
 
     pub fn remaining_references(&self) -> usize {
@@ -307,16 +310,17 @@ impl SliceData {
         }
     }
     /// returns internal cell regardless window settings
-    #[deprecated]
-    pub fn cell(&self) -> &Cell {
+    pub fn cell(&self) -> Cell {
         match &self.data {
-            InternalData::Cell(cell) => cell,
-            _ => &crate::CELL_DEFAULT
+            InternalData::None => Cell::default(),
+            InternalData::Cell(cell) => cell.clone(),
+            _ => self.as_builder().into_cell().unwrap() // it is safe because simple bitstring
         }
     }
     /// returns internal cell regardless window settings
     pub fn cell_opt(&self) -> Option<&Cell> {
         match &self.data {
+            InternalData::None => Some(&crate::CELL_DEFAULT),
             InternalData::Cell(cell) => Some(cell),
             _ => None
         }
@@ -418,11 +422,12 @@ impl SliceData {
             Ok(self.storage()[q] >> (8 - r - bits) & ((1 << bits) - 1))
         } else {
             let mut ret = 0u16;
-            if q < self.storage().len() {
-                ret |= (self.storage()[q] as u16) << 8;
+            let data = self.storage();
+            if q < data.len() {
+                ret |= (data[q] as u16) << 8;
             }
-            if q < self.storage().len() - 1 {
-                ret |= self.storage()[q + 1] as u16;
+            if q < data.len() - 1 {
+                ret |= data[q + 1] as u16;
             }
             Ok((ret >> (8 - r)) as u8 >> (8 - bits))
         }
@@ -651,7 +656,7 @@ impl SliceData {
 
     pub fn common_prefix(a: &SliceData, b: &SliceData) -> (Option<SliceData>, Option<SliceData>, Option<SliceData>) {
         let mut offset = 0;
-        let max_possible_prefix_length_in_bits = cmp::min(a.remaining_bits(), b.remaining_bits());
+        let max_possible_prefix_length_in_bits = a.remaining_bits().min(b.remaining_bits());
         while (offset + 8) <= max_possible_prefix_length_in_bits {
             if a.get_byte(offset).unwrap() != b.get_byte(offset).unwrap() {
                 break;
@@ -680,7 +685,7 @@ impl SliceData {
             let diff = a_bits ^ b_bits;
             let mut diff = diff.leading_zeros() as usize;
             diff -= 8 - last_bits_len;
-            let diff = cmp::min(diff, last_bits_len);
+            let diff = diff.min(last_bits_len);
 
             prefix = a.clone();
             let end = offset + diff;
