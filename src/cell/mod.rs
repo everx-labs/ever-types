@@ -528,7 +528,6 @@ impl Deref for Cell {
     }
 }
 
-
 impl Default for Cell {
     fn default() -> Self {
         CELL_DEFAULT.clone()
@@ -1835,7 +1834,6 @@ pub struct UsageTree {
 }
 
 impl UsageTree {
-
 
     pub fn with_root(root: Cell) -> Self {
         let visited = Arc::new(lockfree::map::Map::new());

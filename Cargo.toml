@@ -27,6 +27,5 @@ serde = { features = [ 'derive', 'rc' ], version = '1.0.105' }
 smallvec = { features = [ 'const_new', 'union', 'write' ], version = '1.10' }
 
 [features]
-ci_run = [  ]
 export_key = [  ]
 
