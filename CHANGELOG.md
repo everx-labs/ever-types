@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.14
+
+- Fixed cells lifetime while BOC traverse
+
 ## Version 2.0.13
 
 - Added UsageTree::build_visited_set
