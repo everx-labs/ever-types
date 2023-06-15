@@ -199,6 +199,23 @@ impl<'a, S: OrderedCellsStorage> BocWriter<'a, S> {
     }
 
     pub fn write_ex<T: Write>(
+        self,
+        dest: &mut T,
+        include_index: bool,
+        include_crc: bool,
+        custom_ref_size: Option<usize>,
+        custom_offset_size: Option<usize>,
+    ) -> Result<()> {
+        if include_crc {
+            let mut dest_wrapped = IoCrcFilter::new_writer(dest);
+            self.write_ex_impl(&mut dest_wrapped, include_index, include_crc, custom_ref_size, custom_offset_size)?;
+            dest_wrapped.finalize()
+        } else {
+            self.write_ex_impl(dest, include_index, include_crc, custom_ref_size, custom_offset_size)
+        }
+    }
+
+    fn write_ex_impl<T: Write>(
         mut self,
         dest: &mut T,
         include_index: bool,
@@ -206,9 +223,6 @@ impl<'a, S: OrderedCellsStorage> BocWriter<'a, S> {
         custom_ref_size: Option<usize>,
         custom_offset_size: Option<usize>,
     ) -> Result<()> {
-        
-        let mut dest = IoCrcFilter::new_writer(dest);
-
         let bytes_total_cells = Self::number_of_bytes_to_fit(self.cells_count);
         let ref_size = custom_ref_size.map_or(bytes_total_cells, |crs| {
             debug_assert!(crs >= bytes_total_cells);
@@ -279,13 +293,7 @@ impl<'a, S: OrderedCellsStorage> BocWriter<'a, S> {
             }
         }
 
-        if include_crc {
-            dest.finalize()?;
-        }
-
-        self.cells.cleanup()?;
-
-        Ok(())
+        self.cells.cleanup()
     }
 
     fn traverse(&mut self, cell: Cell) -> Result<()> {
@@ -479,6 +487,7 @@ impl<'a> BocReader<'a> {
         let src_full_len = src.seek(SeekFrom::End(0))? - position;
         src.seek(SeekFrom::Start(position))?;
 
+        // TODO do not compute crc if header says crc isn't included
         let mut src = IoCrcFilter::new_reader(src);
 
         let header = Self::read_header(&mut src)?;
@@ -951,7 +960,7 @@ impl<'a> BocReader<'a> {
     }
 }
 
-/// Filters given Write or Read object's write or read operations and calculates data's CRC
+/// Wraps I/O operations and computes CRC32-C of the data being processed
 struct IoCrcFilter<'a, T> {
     io_object: &'a mut T,
     hasher: Digest<'a, u32>

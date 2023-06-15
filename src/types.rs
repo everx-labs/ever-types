@@ -187,7 +187,7 @@ impl From<&[u8; 32]> for UInt256 {
 }
 
 impl From<&[u8]> for UInt256 {
-    fn from(value: &[u8]) -> Self { Self::from_le_bytes(value) }
+    fn from(value: &[u8]) -> Self { Self::from_slice(value) }
 }
 
 impl From<Vec<u8>> for UInt256 {

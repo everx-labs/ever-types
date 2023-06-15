@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.15
+
+- BocWriter::write_ex(): do not compute CRC if not requested
+
 ## Version 2.0.14
 
 - Fixed cells lifetime while BOC traverse

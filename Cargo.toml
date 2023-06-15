@@ -2,7 +2,7 @@
 build = 'common/build/build.rs'
 edition = '2021'
 name = 'ton_types'
-version = '2.0.14'
+version = '2.0.15'
 
 [dependencies]
 aes-ctr = '0.6'
@@ -28,4 +28,11 @@ smallvec = { features = [ 'const_new', 'union', 'write' ], version = '1.10' }
 
 [features]
 export_key = [  ]
+
+[[bench]]
+harness = false
+name = 'benchmarks'
+
+[lib]
+bench = false
 
