@@ -109,9 +109,12 @@ pub fn write_boc(root_cell: &Cell) -> Result<Vec<u8>> {
 
 impl<'a> BocWriter<'a, SimpleOrderedCellsStorage> {
     pub fn with_root(root_cell: &'a Cell) -> Result<Self> {
+        Self::with_roots([root_cell.clone()])
+    }
+    pub fn with_owned_root(root_cell: Cell) -> Result<Self> {
         Self::with_roots([root_cell])
     }
-    pub fn with_roots(root_cells: impl IntoIterator<Item = &'a Cell>) -> Result<Self> {
+    pub fn with_roots(root_cells: impl IntoIterator<Item = Cell>) -> Result<Self> {
         fn default_abort() -> bool { false }
         BocWriter::<SimpleOrderedCellsStorage>::with_params(
             root_cells,
@@ -125,7 +128,7 @@ impl<'a> BocWriter<'a, SimpleOrderedCellsStorage> {
 impl<'a, S: OrderedCellsStorage> BocWriter<'a, S> {
 
     pub fn with_params(
-        root_cells: impl IntoIterator<Item = &'a Cell>,
+        root_cells: impl IntoIterator<Item = Cell>,
         max_depth: u16,
         cells_storage: S,
         abort: &'a dyn Fn() -> bool,
@@ -285,13 +288,13 @@ impl<'a, S: OrderedCellsStorage> BocWriter<'a, S> {
         Ok(())
     }
 
-    fn traverse(&mut self, cell: &Cell) -> Result<()> {
+    fn traverse(&mut self, cell: Cell) -> Result<()> {
         check_abort(self.abort)?;
         if cell.virtualization() != 0 {
             fail!("Virtual cells serialisation is prohibited");
         }
         let hash = cell.repr_hash();
-        self.update_counters(cell)?;
+        self.update_counters(&cell)?;
         let mut children: SmallVec<[Cell; MAX_REFERENCES_COUNT]> = SmallVec::new();
         let mut children_hashes: SmallVec<[UInt256; MAX_REFERENCES_COUNT]> = SmallVec::new();
         for i in 0..cell.references_count() {
@@ -301,10 +304,10 @@ impl<'a, S: OrderedCellsStorage> BocWriter<'a, S> {
                 children_hashes.push(child_hash);
             }
         }
-        self.cells.store_cell(cell.clone())?;
+        self.cells.store_cell(cell)?;
         for (i, child) in children.into_iter().enumerate() {
             if !self.cells.contains_hash(&children_hashes[i])? {
-                self.traverse(&child)?;
+                self.traverse(child)?;
             }
         }
         self.cells.push_cell(&hash)?;
