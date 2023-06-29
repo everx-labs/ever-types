@@ -25,7 +25,6 @@ pub trait KeyOption: Sync + Send + Debug {
     fn pub_key(&self) -> Result<&[u8]>;
     fn sign(&self, data: &[u8]) -> Result<Vec<u8>>;
     fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()>;
-    // fn into_public_key_tl(&self) -> Result<ton::PublicKey>;
     #[cfg(feature = "export_key")]
     fn export_key(&self) -> Result<&[u8]>;
     fn shared_secret(&self, other_pub_key: &[u8]) -> Result<[u8; 32]>;
