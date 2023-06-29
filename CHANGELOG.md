@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.16
+
+- Removal of dead code
+
 ## Version 2.0.15
 
 - BocWriter::write_ex(): do not compute CRC if not requested
