@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.17
+
+- Additional checks for big cells count while BOC reading
+
 ## Version 2.0.16
 
 - Removal of dead code

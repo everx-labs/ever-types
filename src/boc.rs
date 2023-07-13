@@ -493,7 +493,6 @@ impl<'a> BocReader<'a> {
 
         let header = Self::read_header(&mut src)?;
         let header_len = src.stream_position()? - position;
-        let accept_big_cells = header.magic == BOC_GENERIC_V2_TAG;
 
         check_abort(self.abort)?;
 
@@ -509,10 +508,11 @@ impl<'a> BocReader<'a> {
         #[cfg(not(target_family = "wasm"))]
         let now1 = std::time::Instant::now();
         let mut actual_data_size = src.stream_position()?;
+        let mut remaining_big_cells = header.big_cells_count;
         for cell_index in 0..header.cells_count {
             check_abort(self.abort)?;
             let raw_cell = Self::read_raw_cell(
-                &mut src, header.ref_size, cell_index, header.cells_count, accept_big_cells)?;
+                &mut src, header.ref_size, cell_index, header.cells_count, &mut remaining_big_cells)?;
             self.indexed_cells.insert(cell_index as u32, raw_cell)?;
         }
         actual_data_size = src.stream_position()? - actual_data_size;
@@ -583,7 +583,6 @@ impl<'a> BocReader<'a> {
         let mut src = Cursor::new(data.deref());
     
         let header = Self::read_header(&mut src)?;
-        let accept_big_cells = header.magic == BOC_GENERIC_V2_TAG;
     
         Self::precheck_cells_tree_len(&header, src.position(), data.len() as u64, false)?;
     
@@ -609,6 +608,7 @@ impl<'a> BocReader<'a> {
         #[cfg(not(target_family = "wasm"))]
         let now1 = std::time::Instant::now();
         let cells_start = src.position() as usize + header.cells_count * header.offset_size;
+        let mut remaining_big_cells = header.big_cells_count;
         for cell_index in (0..header.cells_count).rev() {
             check_abort(self.abort)?;
 
@@ -640,9 +640,10 @@ impl<'a> BocReader<'a> {
             }
     
             let cell = DataCell::with_external_data(refs, &data, offset, Some(self.max_depth))?;
-            if !accept_big_cells && cell.cell_type() == CellType::Big {
-                fail!("Big cells are not expected with magic 0x{:x}", header.magic);
+            if remaining_big_cells == 0 && cell.cell_type() == CellType::Big {
+                fail!("Big cell is not allowed");
             }
+            remaining_big_cells -= 1;
             self.done_cells.insert(cell_index as u32, Cell::with_cell_impl(cell))?;
         }
         #[cfg(not(target_family = "wasm"))]
@@ -856,16 +857,17 @@ impl<'a> BocReader<'a> {
         ref_size: usize,
         cell_index: usize,
         cells_count: usize,
-        accept_big_cells: bool,
+        remaining_big_cells: &mut usize,
     ) -> Result<RawCell> where T: Read {
         let mut refs = [0; 4];
         let mut data;
         let mut d1d2 = [0_u8; 2];
         src.read_exact(&mut d1d2[0..1])?;
         if cell::is_big_cell(&d1d2[0..1]) {
-            if !accept_big_cells {
-                fail!("big cells are not allowed");
+            if *remaining_big_cells == 0 {
+                fail!("big cell is not allowed");
             }
+            *remaining_big_cells -= 1;
             let len = src.read_be_uint(3)? as usize;
             if len > MAX_BIG_DATA_BYTES {
                 fail!("big cell data length {} is too big", len);
