@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.18
+
+- Fixed big cells counting in read_inmem
+
 ## Version 2.0.17
 
 - Additional checks for big cells count while BOC reading

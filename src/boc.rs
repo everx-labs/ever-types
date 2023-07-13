@@ -640,10 +640,12 @@ impl<'a> BocReader<'a> {
             }
     
             let cell = DataCell::with_external_data(refs, &data, offset, Some(self.max_depth))?;
-            if remaining_big_cells == 0 && cell.cell_type() == CellType::Big {
-                fail!("Big cell is not allowed");
+            if cell.cell_type() == CellType::Big {
+                if remaining_big_cells == 0 {
+                    fail!("Big cell is not allowed");
+                }
+                remaining_big_cells -= 1;
             }
-            remaining_big_cells -= 1;
             self.done_cells.insert(cell_index as u32, Cell::with_cell_impl(cell))?;
         }
         #[cfg(not(target_family = "wasm"))]
