@@ -21,7 +21,7 @@ num-traits = '0.2'
 rand = '0.7'
 serde_json = '1.0'
 sha2 = '0.10'
-x25519-dalek = '1.2'
+x25519-dalek = '2'
 lockfree = { git = 'https://github.com/tonlabs/lockfree.git' }
 serde = { features = [ 'derive', 'rc' ], version = '1.0.105' }
 smallvec = { features = [ 'const_new', 'union', 'write' ], version = '1.10' }
