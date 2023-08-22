@@ -69,12 +69,14 @@ pub fn base64_encode_url_safe(input: impl AsRef<[u8]>) -> String {
 // Ed25519 --------------------------------------------------------------
 
 pub struct Ed25519ExpandedPrivateKey {
-    inner: ed25519_dalek::ExpandedSecretKey
+    // Currently, ed25519_dalek::hazmat::ExpandedSecretKey can't be
+    // converted back to bytes, so we have to have a raw slice here
+    inner: [u8; 64]
 }
 
 impl Ed25519ExpandedPrivateKey {
     pub fn to_bytes(&self) -> [u8; 64] {
-        self.inner.to_bytes()
+        self.inner
     }
 }
 
@@ -84,51 +86,56 @@ pub struct Ed25519PrivateKey {
 
 impl Ed25519PrivateKey {
     pub fn to_bytes(&self) -> [u8; 32] {
-        self.inner.to_bytes()
+        self.inner
     }
 }
 
 pub struct Ed25519PublicKey {
-    inner: ed25519_dalek::PublicKey
+    inner: ed25519_dalek::VerifyingKey
 }
 
 impl Ed25519PublicKey {
     pub fn to_bytes(&self) -> [u8; 32] {
         self.inner.to_bytes()
     }
+    pub fn from_bytes(bytes: &[u8; 32]) -> Result<Self> {
+        Ok(Self { inner: ed25519_dalek::VerifyingKey::from_bytes(bytes)? })
+    }
 }
 
 pub fn ed25519_create_expanded_private_key(src: &[u8]) -> Result<Ed25519ExpandedPrivateKey> {
     let ret = Ed25519ExpandedPrivateKey {
-        inner: ed25519_dalek::ExpandedSecretKey::from_bytes(src)?
+        inner: src.try_into()?
     };
     Ok(ret)
 }
 
 pub fn ed25519_create_private_key(src: &[u8]) -> Result<Ed25519PrivateKey> {
     let ret = Ed25519PrivateKey {
-        inner: ed25519_dalek::SecretKey::from_bytes(src)?
+        inner: src.try_into()?
     };
     Ok(ret)
 }
 
 pub fn ed25519_create_public_key(src: &Ed25519ExpandedPrivateKey) -> Result<Ed25519PublicKey> {
+    let exp_key = ed25519_dalek::hazmat::ExpandedSecretKey::from_bytes(&src.inner);
     let ret = Ed25519PublicKey {
-        inner: ed25519_dalek::PublicKey::from(&src.inner)
+        inner: ed25519_dalek::VerifyingKey::from(&exp_key)
     };
     Ok(ret)
 }
 
 pub fn ed25519_expand_private_key(src: &Ed25519PrivateKey) -> Result<Ed25519ExpandedPrivateKey> {
+    let bytes = sha2::Sha512::default().chain_update(src.inner).finalize();
     let ret = Ed25519ExpandedPrivateKey {
-        inner: ed25519_dalek::ExpandedSecretKey::from(&src.inner)
+        inner: bytes.into()
     };
     Ok(ret)
 }
 
 pub fn ed25519_generate_private_key() -> Result<Ed25519PrivateKey> {
     let ret = Ed25519PrivateKey {
-        inner: ed25519_dalek::SecretKey::generate(&mut rand::thread_rng())
+        inner: ed25519_dalek::SigningKey::generate(&mut rand::thread_rng()).to_bytes()
     };
     Ok(ret)
 }
@@ -138,18 +145,18 @@ pub fn ed25519_sign(
     pub_key: Option<&[u8]>, 
     data: &[u8]
 ) -> Result<Vec<u8>> {
-    let exp_key = ed25519_dalek::ExpandedSecretKey::from_bytes(exp_pvt_key)?;
+    let exp_key = ed25519_dalek::hazmat::ExpandedSecretKey::from_bytes(exp_pvt_key.try_into()?);
     let pub_key = if let Some(pub_key) = pub_key {
-        ed25519_dalek::PublicKey::from_bytes(pub_key)?
+        ed25519_dalek::VerifyingKey::from_bytes(pub_key.try_into()?)?
     } else {
-        ed25519_dalek::PublicKey::from(&exp_key)
+        ed25519_dalek::VerifyingKey::from(&exp_key)
     };
-    Ok(exp_key.sign(data, &pub_key).to_bytes().to_vec())
+    Ok(ed25519_dalek::hazmat::raw_sign::<sha2::Sha512>(&exp_key, data, &pub_key).to_vec())
 }
 
 pub fn ed25519_verify(pub_key: &[u8], data: &[u8], signature: &[u8]) -> Result<()> {
-    let pub_key = ed25519_dalek::PublicKey::from_bytes(pub_key)?;
-    pub_key.verify(data, &ed25519::Signature::from_bytes(signature)?)?;
+    let pub_key = ed25519_dalek::VerifyingKey::from_bytes(pub_key.try_into()?)?;
+    pub_key.verify(data, &ed25519::Signature::from_bytes(signature.try_into()?))?;
     Ok(())
 }
 

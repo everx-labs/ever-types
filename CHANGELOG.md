@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.19
+
+- Upgraded to ed25519-dalek 2.0
+
 ## Version 2.0.18
 
 - Fixed big cells counting in read_inmem
