@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.20
+
+- Add hashmap benchmark with profiling instructions
+
 ## Version 2.0.19
 
 - Upgraded to ed25519-dalek 2.0
