@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.22
+
+- Transform BocWriter::traverse() into iterative algo
+
 ## Version 2.0.21
 
 - Refactor hashmap functions to optimize perfomance

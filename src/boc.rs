@@ -23,7 +23,7 @@ const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 
 use crate::{
     cell::{self, Cell, DataCell, SHA256_SIZE, DEPTH_SIZE, MAX_DATA_BYTES, MAX_SAFE_DEPTH},
-    ByteOrderRead, UInt256, Result, fail, error, MAX_REFERENCES_COUNT, full_len, CellType, MAX_BIG_DATA_BYTES, CellImpl,
+    ByteOrderRead, UInt256, Result, Status, fail, error, MAX_REFERENCES_COUNT, full_len, CellType, MAX_BIG_DATA_BYTES, CellImpl,
 };
 use smallvec::SmallVec;
 
@@ -297,29 +297,47 @@ impl<'a, S: OrderedCellsStorage> BocWriter<'a, S> {
         self.cells.cleanup()
     }
 
-    fn traverse(&mut self, cell: Cell) -> Result<()> {
-        check_abort(self.abort)?;
-        if cell.virtualization() != 0 {
-            fail!("Virtual cells serialisation is prohibited");
+    fn traverse(&mut self, root: Cell) -> Status {
+        enum Phase {
+            Pre(Cell),
+            Post(Cell)
         }
-        let hash = cell.repr_hash();
-        self.update_counters(&cell)?;
-        let mut children: SmallVec<[Cell; MAX_REFERENCES_COUNT]> = SmallVec::new();
-        let mut children_hashes: SmallVec<[UInt256; MAX_REFERENCES_COUNT]> = SmallVec::new();
-        for i in 0..cell.references_count() {
-            let child_hash = cell.reference_repr_hash(i)?;
-            if !children_hashes.contains(&child_hash) && !self.cells.contains_hash(&child_hash)? {
-                children.push(cell.reference(i)?);
-                children_hashes.push(child_hash);
+        let mut stack = vec!(Phase::Pre(root));
+        while let Some(phase) = stack.pop() {
+            check_abort(self.abort)?;
+            match phase {
+                Phase::Pre(cell) => {
+                    if cell.virtualization() != 0 {
+                        fail!("Virtual cells serialization is prohibited");
+                    }
+                    // self.cells may change at some point between pushing pre-phase
+                    // and popping it off the stack, so repeat the check
+                    if self.cells.contains_hash(&cell.repr_hash())? {
+                        continue;
+                    }
+                    stack.push(Phase::Post(cell.clone()));
+                    self.update_counters(&cell)?;
+                    let mut children: SmallVec<[Cell; MAX_REFERENCES_COUNT]> = SmallVec::new();
+                    let mut children_hashes: SmallVec<[UInt256; MAX_REFERENCES_COUNT]> = SmallVec::new();
+                    for i in 0..cell.references_count() {
+                        let child_hash = cell.reference_repr_hash(i)?;
+                        if !children_hashes.contains(&child_hash) && !self.cells.contains_hash(&child_hash)? {
+                            children.push(cell.reference(i)?);
+                            children_hashes.push(child_hash);
+                        }
+                    }
+                    self.cells.store_cell(cell)?;
+                    for (i, child) in children.into_iter().enumerate().rev() {
+                        if !self.cells.contains_hash(&children_hashes[i])? {
+                            stack.push(Phase::Pre(child));
+                        }
+                    }
+                }
+                Phase::Post(cell) => {
+                    self.cells.push_cell(&cell.repr_hash())?;
+                }
             }
         }
-        self.cells.store_cell(cell)?;
-        for (i, child) in children.into_iter().enumerate() {
-            if !self.cells.contains_hash(&children_hashes[i])? {
-                self.traverse(child)?;
-            }
-        }
-        self.cells.push_cell(&hash)?;
         Ok(())
     }
 
