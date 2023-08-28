@@ -17,6 +17,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::ops::{Bound, Range, RangeBounds};
 
+use super::SmallData;
 use crate::{error, fail, cell::{BuilderData, Cell, CellType, IBitstring, LevelMask}, parse_slice_base};
 use crate::types::{ExceptionCode, Result, UInt256};
 use smallvec::SmallVec;
@@ -26,7 +27,7 @@ enum InternalData {
     #[default]
     None,
     Cell(Cell),
-    Data(SmallVec<[u8; 128]>, usize)
+    Data(SmallData, usize) // bitstring variant which optimizes storage of data without references
 }
 
 #[derive(Eq, Clone, Default)]
@@ -127,7 +128,7 @@ impl SliceData {
         }
     }
 
-    pub(super) fn with_bitstring(data: impl Into<SmallVec<[u8; 128]>>, length_in_bits: usize) -> Self {
+    pub(super) fn with_bitstring(data: impl Into<SmallData>, length_in_bits: usize) -> Self {
         Self {
             data: InternalData::Data(data.into(), length_in_bits.min(super::MAX_DATA_BITS)),
             references_window: 0..0,
@@ -203,6 +204,10 @@ impl SliceData {
         }
     }
 
+    pub fn clear_all_references(&mut self) {
+        self.references_window.end = self.references_window.start
+    }
+
     /// shrinks references_window: range - subrange of current window, returns shrinked references
     pub fn shrink_references<T: RangeBounds<usize>>(&mut self, range: T) -> Vec<Cell> {
         let mut vec = vec![];
@@ -229,7 +234,7 @@ impl SliceData {
         vec
     }
 
-    fn remaining_data(self) -> (SmallVec<[u8; 128]>, usize) {
+    fn remaining_data(self) -> (SmallData, usize) {
         if self.data_window.start >= self.data_window.end {
             return (SmallVec::new(), 0)
         }
@@ -310,6 +315,8 @@ impl SliceData {
         }
     }
     /// returns internal cell regardless window settings
+    /// use this function carefully
+    /// it may create new real cell if SliceData was a bitstring
     pub fn cell(&self) -> Cell {
         match &self.data {
             InternalData::None => Cell::default(),
@@ -318,6 +325,7 @@ impl SliceData {
         }
     }
     /// returns internal cell regardless window settings
+    /// don't use this function
     pub fn cell_opt(&self) -> Option<&Cell> {
         match &self.data {
             InternalData::None => Some(&crate::CELL_DEFAULT),
@@ -597,12 +605,18 @@ impl SliceData {
     }
 
     /// Returns Cell from references if present and next bit in slice is one
-    pub fn get_next_dictionary(&mut self) -> Result<Option<Cell>> {
+    pub fn get_next_maybe_reference(&mut self) -> Result<Option<Cell>> {
         if self.get_next_bit()? {
-            Ok(Some(self.checked_drain_reference()?))
+            let cell = self.checked_drain_reference()?;
+            Ok(Some(cell))
         } else {
             Ok(None)
         }
+    }
+
+    /// Returns Cell from references if present and next bit in slice is one
+    pub fn get_next_dictionary(&mut self) -> Result<Option<Cell>> {
+        self.get_next_maybe_reference()
     }
 
     /// Returns subslice of current slice and moves pointer
@@ -785,9 +799,15 @@ impl SliceData {
 
     pub fn as_hex_string(&self) -> String {
         let len = self.remaining_bits();
-        let mut data: SmallVec<[u8; 128]> = self.get_bytestring(0).into();
-        super::append_tag(&mut data, len);
-        super::to_hex_string(data.as_slice(), len, true)
+        let mut data = self.get_bytestring(0);
+        if len % 8 == 0 {
+            data.push(0x80);
+            super::to_hex_string(data, len, true)
+        } else {
+            let mut data: SmallData = data.into();
+            super::append_tag(&mut data, len);
+            super::to_hex_string(data, len, true)
+        }
     }
 
 }
@@ -852,7 +872,7 @@ impl fmt::LowerHex for SliceData {
 impl fmt::UpperHex for SliceData {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let len = self.remaining_bits();
-        let mut data: SmallVec<[u8; 128]> = self.get_bytestring(0).into();
+        let mut data: SmallData = self.get_bytestring(0).into();
         super::append_tag(&mut data, len);
         write!(f, "{}", super::to_hex_string(data.as_slice(), len, false))
     }

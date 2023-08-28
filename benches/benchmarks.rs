@@ -162,5 +162,6 @@ criterion_group!(
     targets =
         bench_boc_write,
         bench_hashmap,
+    bench_hashmap,
 );
 criterion_main!(benches);

@@ -52,11 +52,11 @@ fn hml_short(key: &SliceData) -> Option<BuilderData> {
     let mut label = BuilderData::with_raw(SmallVec::from_slice(&[SHORT_LABEL_PREFIX]), 1).ok()?;
     let length = key.remaining_bits();
     for _ in 0..length / 32 {
-        label.append_bits(std::u32::MAX as usize, 32).ok()?;
+        label.append_u32(u32::MAX).ok()?;
     }
     let remainder = length % 32;
     if remainder != 0 {
-        label.append_bits(std::u32::MAX as usize, remainder).ok()?;
+        label.append_bits(usize::MAX, remainder).ok()?;
     }
     label.append_bit_zero().ok()?;
     label.append_bytestring(key).ok()?;
@@ -134,18 +134,31 @@ impl LabelReader {
             len += 1;
         }
         *max = max.checked_sub(len).ok_or(ExceptionCode::CellUnderflow)?;
-        let mut label = cursor.clone();
-        cursor.shrink_data(len..);
-        label.shrink_references(..0);
-        label.shrink_data(..len);
-        Ok(label)
+        Ok(cursor.shrink_data(len..))
+    }
+    fn get_label_short_length(cursor: &mut SliceData, max: usize) -> Result<usize> {
+        let mut len = 0;
+        while cursor.get_next_bit()? {
+            len += 1;
+        }
+        if len <= max {
+            Ok(len)
+        } else {
+            fail!(ExceptionCode::CellUnderflow)
+        }
     }
     fn get_label_long(cursor: &mut SliceData, max: &mut usize) -> Result<SliceData> {
         let len = cursor.get_next_size(*max)? as usize;
-        let mut label = cursor.shrink_data(len..);
-        label.shrink_references(..0);
         *max = max.checked_sub(len).ok_or(ExceptionCode::CellUnderflow)?;
-        Ok(label)
+        Ok(cursor.shrink_data(len..))
+    }
+    fn get_label_long_length(cursor: &mut SliceData, max: usize) -> Result<usize> {
+        let len = cursor.get_next_size(max)? as usize;
+        if len <= max {
+            Ok(len)
+        } else {
+            fail!(ExceptionCode::CellUnderflow)
+        }
     }
     fn get_label_same(cursor: &mut SliceData, max: &mut usize, mut key: BuilderData) -> Result<BuilderData> {
         let value = if cursor.get_next_bit()? { 0xFF } else { 0 };
@@ -153,6 +166,15 @@ impl LabelReader {
         key.append_raw(&vec![value; len / 8 + 1], len)?;
         *max = max.checked_sub(len).ok_or(ExceptionCode::CellUnderflow)?;
         Ok(key)
+    }
+    fn get_label_same_length(cursor: &mut SliceData, max: usize) -> Result<usize> {
+        cursor.get_next_bit()?;
+        let len = cursor.get_next_size(max)? as usize;
+        if len <= max {
+            Ok(len)
+        } else {
+            fail!(ExceptionCode::CellUnderflow)
+        }
     }
     pub fn new(cursor: SliceData) -> Self {
         Self {
@@ -201,6 +223,17 @@ impl LabelReader {
             key = Self::get_label_same(cursor, max, key)?;
         }
         Ok(key)
+    }
+    pub fn read_label_length(cursor: &mut SliceData, max: usize) -> Result<usize> {
+        if cursor.is_empty() {
+            Ok(0)
+        } else if !cursor.get_next_bit()? {
+            Self::get_label_short_length(cursor, max)
+        } else if !cursor.get_next_bit()? {
+            Self::get_label_long_length(cursor, max)
+        } else {
+            Self::get_label_same_length(cursor, max)
+        }
     }
     pub fn get_label(&mut self, max: usize) -> Result<SliceData> {
         if self.already_read {
@@ -286,7 +319,7 @@ impl SliceData {
     pub fn get_dictionary_opt(&mut self) -> Option<SliceData> {
         let mut root = self.clone();
         if self.get_next_bit_opt()? == 0 {
-            root.shrink_references(..0);
+            root.clear_all_references();
         } else if self.remaining_references() == 0 {
             return None
         } else {
@@ -399,8 +432,7 @@ pub trait HashmapType {
         Ok(())
     }
     fn read_hashmap_data(&mut self, slice: &mut SliceData) -> Result<()> {
-        let data = slice.get_dictionary()?;
-        *self.data_mut() = data.reference_opt(0);
+        *self.data_mut() = slice.get_next_dictionary()?;
         Ok(())
     }
     fn is_empty(&self) -> bool {
@@ -430,11 +462,11 @@ pub trait HashmapType {
         builder.checked_append_references_and_data(remainder)?;
         Ok(builder)
     }
-    fn make_edge(key: &SliceData, bit_len: usize, is_left: bool, mut next: SliceData) -> Result<BuilderData> {
+    fn make_edge(key: SliceData, bit_len: usize, is_left: bool, mut next: SliceData) -> Result<BuilderData> {
         let mut next_bit_len = bit_len.checked_sub(key.remaining_bits() + 1).ok_or(ExceptionCode::CellUnderflow)?;
-        let mut label = key.as_builder();
-        label.append_bit_bool(!is_left)?;
-        label = LabelReader::read_label_raw(&mut next, &mut next_bit_len, label)?;
+        let mut key = key.into_builder();
+        key.append_bit_bool(!is_left)?;
+        let label = LabelReader::read_label_raw(&mut next, &mut next_bit_len, key)?;
         let is_leaf = Self::is_leaf(&mut next);
         Self::make_cell_with_label_and_data(SliceData::load_bitstring(label)?, bit_len, is_leaf, &next)
     }
@@ -493,22 +525,6 @@ pub trait HashmapType {
         }
     }
 
-    fn hashmap_get_new(&self, key: SliceData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
-        let bit_len = self.bit_len();
-        Self::check_key_fail(bit_len, &key)?;
-        if let Some(root) = self.data() {
-            let mut cursor = LabelReader::new(gas_consumer.load_cell(root.clone())?);
-            let (_key, rem_prefix) = down_by_tree::<Self>(&key, &mut cursor, self.bit_len(), gas_consumer)?;
-            if rem_prefix.is_none() {
-                let mut remainder = cursor.remainder()?;
-                if Self::is_leaf(&mut remainder) {
-                    return Ok(Some(remainder))
-                }
-            }
-        }
-        Ok(None)
-    }
-
     fn hashmap_set_with_mode(
         &mut self,
         key: SliceData,
@@ -564,7 +580,7 @@ pub trait HashmapType {
             Some(root) => {
                 let mut len = 0;
                 let cursor = LabelReader::with_cell(root)?;
-                count_internal::<Self>(cursor, self.bit_len(), &mut len, std::usize::MAX)?;
+                count_internal::<Self>(cursor, self.bit_len(), &mut len, usize::MAX)?;
                 Ok(len)
             }
             None => Ok(0)
@@ -905,6 +921,7 @@ where
     }
     Ok(true)
 }
+
 fn dict_scan_diff<T, F>(
     cell_1: Option<Cell>,
     cell_2: Option<Cell>,
@@ -1227,7 +1244,7 @@ fn remove_node<T: HashmapType + ?Sized>(
                             let (builder, _remainder) = T::make_fork(&label, bit_len, next, other, next_index == 1)?;
                             *cell_opt = Some(gas_consumer.finalize_cell(builder)?)
                         } else {
-                            let builder = T::make_edge(&label, bit_len, next_index == 1, gas_consumer.load_cell(other)?)?;
+                            let builder = T::make_edge(label, bit_len, next_index == 1, gas_consumer.load_cell(other)?)?;
                             *cell_opt = Some(gas_consumer.finalize_cell(builder)?)
                         }
                     }
@@ -1604,7 +1621,7 @@ pub trait HashmapSubtree: HashmapType + Clone + Sized {
             let mut cursor = LabelReader::new(SliceData::load_cell_ref(root)?);
             let (_key, remainder_prefix) = down_by_tree::<Self>(prefix, &mut cursor, self.bit_len(), &mut 0)?;
             if remainder_prefix.is_none() {
-                Ok(cursor.cursor.cell_opt().cloned())
+                Ok(Some(cursor.remainder()?.cell()))
             } else {
                 Ok(None)
             }

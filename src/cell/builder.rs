@@ -15,6 +15,7 @@ use std::convert::From;
 use std::fmt;
 
 use smallvec::SmallVec;
+pub(super) type SmallData = SmallVec<[u8; 128]>;
 
 use crate::cell::{
     append_tag, find_tag, Cell, CellType, DataCell, LevelMask, SliceData, MAX_DATA_BITS,
@@ -27,7 +28,7 @@ const EXACT_CAPACITY: usize = 128;
 
 #[derive(Debug, Default, PartialEq, Clone, Eq)]
 pub struct BuilderData {
-    data: SmallVec<[u8; 128]>,
+    data: SmallData,
     length_in_bits: usize,
     pub(super) references: SmallVec<[Cell; 4]>,
     pub(super) cell_type: CellType,
@@ -49,7 +50,7 @@ impl BuilderData {
     }
 
     pub fn with_raw(
-        data: impl Into<SmallVec<[u8; 128]>>,
+        data: impl Into<SmallData>,
         length_in_bits: usize,
     ) -> Result<BuilderData> {
         let mut data = data.into();
@@ -78,7 +79,7 @@ impl BuilderData {
     }
 
     pub fn with_raw_and_refs(
-        data: impl Into<SmallVec<[u8; 128]>>,
+        data: impl Into<SmallData>,
         length_in_bits: usize,
         refs: impl IntoIterator<Item = Cell>,
     ) -> Result<BuilderData> {
@@ -87,7 +88,7 @@ impl BuilderData {
         Ok(builder)
     }
 
-    pub fn with_bitstring(data: impl Into<SmallVec<[u8; 128]>>) -> Result<BuilderData> {
+    pub fn with_bitstring(data: impl Into<SmallData>) -> Result<BuilderData> {
         let data = data.into();
         let length_in_bits = find_tag(data.as_slice());
         if length_in_bits == 0 {
@@ -200,7 +201,7 @@ impl BuilderData {
 
     // TODO: move it to builder operations to bitstring
     pub(super) fn append_raw_data(
-        data: &mut SmallVec<[u8; 128]>,
+        data: &mut SmallData,
         length_in_bits: &mut usize,
         slice: &[u8],
         bits: usize,
@@ -226,7 +227,7 @@ impl BuilderData {
     }
 
     fn append_without_shift(
-        data: &mut SmallVec<[u8; 128]>,
+        data: &mut SmallData,
         length_in_bits: &mut usize,
         slice: &[u8],
         bits: usize,
@@ -241,7 +242,7 @@ impl BuilderData {
     }
 
     fn append_with_shift(
-        data: &mut SmallVec<[u8; 128]>,
+        data: &mut SmallData,
         length_in_bits: &mut usize,
         slice: &[u8],
         bits: usize,
@@ -262,7 +263,7 @@ impl BuilderData {
     }
 
     fn append_with_double_shift(
-        data: &mut SmallVec<[u8; 128]>,
+        data: &mut SmallData,
         length_in_bits: &mut usize,
         slice: &[u8],
         bits: usize,
@@ -321,7 +322,7 @@ impl BuilderData {
         }
     }
 
-    pub fn replace_data(&mut self, data: impl Into<SmallVec<[u8; 128]>>, length_in_bits: usize) {
+    pub fn replace_data(&mut self, data: impl Into<SmallData>, length_in_bits: usize) {
         let data = data.into();
         self.length_in_bits = length_in_bits.min(MAX_DATA_BITS).min(data.len() * 8);
         self.data = data;
