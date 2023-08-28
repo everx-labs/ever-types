@@ -18,12 +18,10 @@ use std::{
     sync::Arc, ops::Deref,
 };
 
-use crc::{Crc, CRC_32_ISCSI, Digest};
-const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
-
 use crate::{
     cell::{self, Cell, DataCell, SHA256_SIZE, DEPTH_SIZE, MAX_DATA_BYTES, MAX_SAFE_DEPTH},
-    ByteOrderRead, UInt256, Result, Status, fail, error, MAX_REFERENCES_COUNT, full_len, CellType, MAX_BIG_DATA_BYTES, CellImpl,
+    ByteOrderRead, UInt256, Result, Status, fail, error, MAX_REFERENCES_COUNT, full_len, CellType, 
+    MAX_BIG_DATA_BYTES, CellImpl, crc32_digest, Crc32,
 };
 use smallvec::SmallVec;
 
@@ -682,9 +680,7 @@ impl<'a> BocReader<'a> {
         #[cfg(not(target_family = "wasm"))]
         let now1 = std::time::Instant::now();
         if header.has_crc {
-            let mut hasher = CASTAGNOLI.digest();
-            hasher.update(&data[..data.len() - 4]);
-            let crc = hasher.finalize();
+            let crc = crc32_digest(&data[..data.len() - 4]);
             src.set_position(data.len() as u64 - 4);
             let read_crc = src.read_le_u32()?;
             if read_crc != crc {
@@ -986,14 +982,14 @@ impl<'a> BocReader<'a> {
 /// Wraps I/O operations and computes CRC32-C of the data being processed
 struct IoCrcFilter<'a, T> {
     io_object: &'a mut T,
-    hasher: Digest<'a, u32>
+    hasher: Crc32<'a>
 }
 
 impl<'a, T: Write> IoCrcFilter<'a, T> {
     pub fn new_writer(io_object: &'a mut T) -> Self {
         IoCrcFilter{ 
             io_object,
-            hasher: CASTAGNOLI.digest()
+            hasher: Crc32::new()
         }
     }
 
@@ -1009,7 +1005,7 @@ impl<'a, T: Read> IoCrcFilter<'a, T> {
     pub fn new_reader(io_object: &'a mut T) -> Self {
         IoCrcFilter{ 
             io_object,
-            hasher: CASTAGNOLI.digest()
+            hasher: Crc32::new()
         }
     }
 

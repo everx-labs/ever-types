@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.23
+
+- Add crypto wrappers
+
 ## Version 2.0.22
 
 - Transform BocWriter::traverse() into iterative algo
