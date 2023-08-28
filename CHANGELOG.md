@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.21
+
+- Refactor hashmap functions to optimize perfomance
+
 ## Version 2.0.20
 
 - Add hashmap benchmark with profiling instructions

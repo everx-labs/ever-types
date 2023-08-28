@@ -1917,7 +1917,7 @@ mod builder_operations;
 pub use self::builder_operations::*;
 use smallvec::SmallVec;
 
-pub(crate) fn to_hex_string(data: &[u8], len: usize, lower: bool) -> String {
+pub(crate) fn to_hex_string(data: impl AsRef<[u8]>, len: usize, lower: bool) -> String {
     if len == 0 {
         return String::new();
     }
