@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.24
+
+- Add BocWriterStack for faster boc saving
+
 ## Version 2.0.23
 
 - Add crypto wrappers
