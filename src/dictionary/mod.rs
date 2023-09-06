@@ -536,7 +536,8 @@ pub trait HashmapType {
         Self::check_key_fail(bit_len, &key)?;
         if let Some(root) = self.data() {
             let mut root = root.clone();
-            let result = put_to_node_with_mode::<Self>(&mut root, bit_len, key, leaf, gas_consumer, mode);
+            let mut ins = HashmapInserter::<Self>::new(leaf, gas_consumer, mode);
+            let result = ins.put_to_node_with_mode(&mut root, bit_len, key);
             *self.data_mut() = Some(root);
             result
         } else if mode.bit(ADD) {
@@ -670,7 +671,7 @@ pub trait HashmapType {
         Ok(())
     }
 
-    fn scan_diff<F>(&self, other: &Self, mut func: F) -> Result<bool> 
+    fn scan_diff<F>(&self, other: &Self, mut func: F) -> Result<bool>
     where F: FnMut(SliceData, Option<SliceData>, Option<SliceData>) -> Result<bool> {
         let bit_len = self.bit_len();
         if bit_len != other.bit_len() {
@@ -824,7 +825,7 @@ fn dict_combine_with<T: HashmapType + ?Sized>(
             let next_index = rem1.get_next_bit_int()?;
             *cell1 = if let Some(mut rem2) = rem2_opt { // simple slice of both trees and make new fork
                 rem2.get_next_bit_int()?; // == 1 - next_index
-                let prefix = prefix_opt.unwrap_or_default(); // 
+                let prefix = prefix_opt.unwrap_or_default(); //
                 let bit_len1 = bit_len - prefix.remaining_bits() - 1;
                 let left = T::make_cell_with_remainder(rem1, bit_len1, &cursor1)?.into_cell()?;
                 let right = T::make_cell_with_remainder(rem2, bit_len1, &cursor2)?.into_cell()?;
@@ -1026,8 +1027,8 @@ where
 /// iterate all elements with callback function
 fn iterate_internal<T, F>(
     mut cursor: LabelReader,
-    mut key: BuilderData, 
-    mut bit_len: usize, 
+    mut key: BuilderData,
+    mut bit_len: usize,
     found: &mut F
 ) -> Result<bool>
 where
@@ -1074,147 +1075,144 @@ fn count_internal<T: HashmapType + ?Sized>(
     Ok(true)
 }
 
-/// Puts element to required branch by first bit
-fn put_to_fork_with_mode<T: HashmapType + ?Sized>(
-    slice: &mut SliceData, // TODO: BuilderData
-    bit_len: usize,
-    mut key: SliceData,
-    leaf: &BuilderData,
-    gas_consumer: &mut dyn GasConsumer,
-    mode: u8
-) -> Leaf {
-    debug_assert!(slice.remaining_bits() == 0);
-    let result;
-    let next_index = key.get_next_bit_int()?;
-    // hmn_fork#_ {n:#} {X:Type} left:^(Hashmap n X) right:^(Hashmap n X) = HashmapNode (n+1) X;
-    let mut builder = BuilderData::new();
-    if slice.remaining_references() != 2 {
-        fail!(ExceptionCode::CellUnderflow)
-    } else {
-        if next_index == 1 {
-            builder.checked_append_reference(slice.checked_drain_reference()?)?;
-        }
-        let mut cell = slice.checked_drain_reference()?;
-        let bit_len = bit_len.checked_sub(1).ok_or(ExceptionCode::CellUnderflow)?;
-        result = put_to_node_with_mode::<T>(&mut cell, bit_len, key, leaf, gas_consumer, mode);
-        builder.checked_append_reference(cell)?;
-        if next_index == 0 {
-            builder.checked_append_reference(slice.checked_drain_reference()?)?;
-        }
-    }
-    *slice = SliceData::load_builder(builder)?;
-    result
+struct HashmapInserter<'a, T: HashmapType + ?Sized> {
+    leaf: &'a BuilderData,
+    gas_consumer: &'a mut dyn GasConsumer,
+    mode: u8,
+    phantom: std::marker::PhantomData<T>,
 }
 
-/// Continues or finishes search of place
-fn put_to_node_with_mode<T: HashmapType + ?Sized>(
-    cell: &mut Cell,
-    bit_len: usize,
-    key: SliceData,
-    leaf: &BuilderData,
-    gas_consumer: &mut dyn GasConsumer,
-    mode: u8
-) -> Leaf {
-    let mut result = Ok(None);
-    let mut slice = gas_consumer.load_cell(cell.clone())?;
-    let label = LabelReader::read_label(&mut slice, bit_len)?;
-    if label == key {
-        // replace existing leaf
-        if T::is_leaf(&mut slice) {
-            result = Ok(Some(slice));
-            if mode.bit(REPLACE) {
-                *cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_builder(key, bit_len, true, leaf)?)?;
-            }
-        } else {
-            fail!(ExceptionCode::FatalError)
+impl<'a, T: HashmapType + ?Sized> HashmapInserter<'a, T> {
+    fn new(leaf: &'a BuilderData, gas_consumer: &'a mut dyn GasConsumer, mode: u8) -> Self {
+        Self { leaf, gas_consumer, mode, phantom: std::marker::PhantomData::<T> }
+    }
+
+    /// Puts element to required branch by looking at first bit
+    fn put_to_fork_with_mode(
+        &mut self,
+        builder: &mut BuilderData,
+        bit_len: usize,
+        mut key: SliceData,
+    ) -> Leaf {
+        if builder.references_used() != 2 {
+            fail!(ExceptionCode::CellUnderflow)
         }
-    } else if label.is_empty() {
-        // 1-bit edge
-        let is_leaf = T::is_leaf(&mut slice);
-        match put_to_fork_with_mode::<T>(&mut slice, bit_len, key, leaf, gas_consumer, mode)? {
-            None => {
-                if mode.bit(ADD) {
-                    *cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(label, bit_len, is_leaf, &slice)?)?;
+        let next_index = key.get_next_bit_int()?;
+        let mut cell = builder.references()[next_index].clone();
+        let bit_len = bit_len.checked_sub(1).ok_or(ExceptionCode::CellUnderflow)?;
+        let result = self.put_to_node_with_mode(&mut cell, bit_len, key);
+        builder.replace_reference_cell(next_index, cell);
+        result
+    }
+
+    /// Continues or finishes search of place
+    fn put_to_node_with_mode(
+        &mut self,
+        cell: &mut Cell,
+        bit_len: usize,
+        key: SliceData,
+    ) -> Leaf {
+        let mut result = Ok(None);
+        let mut slice = self.gas_consumer.load_cell(cell.clone())?;
+        let label = LabelReader::read_label(&mut slice, bit_len)?;
+        if label == key {
+            // replace existing leaf
+            if T::is_leaf(&mut slice) {
+                result = Ok(Some(slice));
+                if self.mode.bit(REPLACE) {
+                    *cell = self.gas_consumer.finalize_cell(T::make_cell_with_label_and_builder(key, bit_len, true, self.leaf)?)?;
                 }
-            }
-            Some(val) => {
-                if mode.bit(REPLACE) {
-                    *cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(label, bit_len, is_leaf, &slice)?)?;
-                }
-                result = Ok(Some(val));
-            }
-        }
-    } else {
-        match SliceData::common_prefix(&label, &key) {
-            (_, _, None) => {// variable length: key shorter than edge
-                if mode.bit(ADD) {
-                    let is_leaf = T::is_leaf(&mut slice);
-                    *cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(label, bit_len, is_leaf, &slice)?)?;
-                }
-            }
-            (label_prefix, Some(label_remainder), Some(key_remainder)) => {
-                if mode.bit(ADD) {
-                    let b = slice_edge::<T>(
-                        slice, bit_len,
-                        label_prefix.unwrap_or_default(), label_remainder, key_remainder,
-                        leaf, gas_consumer
-                    )?;
-                    *cell = gas_consumer.finalize_cell(b)?;
-                }
-            }
-            (Some(prefix), None, Some(key_remainder)) => {
-                // next iteration
-                let is_leaf = T::is_leaf(&mut slice);
-                result = put_to_fork_with_mode::<T>(
-                    &mut slice,
-                    bit_len.checked_sub(prefix.remaining_bits()).ok_or(ExceptionCode::CellUnderflow)?,
-                    key_remainder, leaf, gas_consumer, mode
-                );                                        
-                let make_cell = match result {
-                    Ok(None) => mode.bit(ADD),
-                    Ok(Some(_)) => mode.bit(REPLACE),
-                    _ => false                    
-                };
-                if make_cell {
-                    *cell = gas_consumer.finalize_cell(
-                        T::make_cell_with_label_and_data(label, bit_len, is_leaf, &slice)?
-                    )?;
-                }
-            }
-            error @ (_, _, _) => {
-                log::error!(
-                    target: "tvm",  
-                    "If we hit this, there's certainly a bug. {:?}. \
-                     Passed: label: {}, key: {} ", 
-                    error, label, key
-                );
+            } else {
                 fail!(ExceptionCode::FatalError)
             }
+        } else if label.is_empty() {
+            // 1-bit edge
+            let is_leaf = T::is_leaf(&mut slice);
+            let mut builder = slice.as_builder();
+            match self.put_to_fork_with_mode(&mut builder, bit_len, key)? {
+                None => {
+                    if self.mode.bit(ADD) {
+                        *cell = self.gas_consumer.finalize_cell(T::make_cell_with_label_and_builder(label, bit_len, is_leaf, &builder)?)?;
+                    }
+                }
+                Some(val) => {
+                    if self.mode.bit(REPLACE) {
+                        *cell = self.gas_consumer.finalize_cell(T::make_cell_with_label_and_builder(label, bit_len, is_leaf, &builder)?)?;
+                    }
+                    result = Ok(Some(val));
+                }
+            }
+        } else {
+            match SliceData::common_prefix(&label, &key) {
+                (_, _, None) => { // variable length: key shorter than edge
+                    if self.mode.bit(ADD) {
+                        let is_leaf = T::is_leaf(&mut slice);
+                        *cell = self.gas_consumer.finalize_cell(T::make_cell_with_label_and_data(label, bit_len, is_leaf, &slice)?)?;
+                    }
+                }
+                (label_prefix, Some(label_remainder), Some(key_remainder)) => {
+                    if self.mode.bit(ADD) {
+                        let b = self.slice_edge(
+                            slice, bit_len,
+                            label_prefix.unwrap_or_default(), label_remainder, key_remainder
+                        )?;
+                        *cell = self.gas_consumer.finalize_cell(b)?;
+                    }
+                }
+                (Some(prefix), None, Some(key_remainder)) => {
+                    // next iteration
+                    let is_leaf = T::is_leaf(&mut slice);
+                    let mut builder = slice.as_builder();
+                    result = self.put_to_fork_with_mode(
+                        &mut builder,
+                        bit_len.checked_sub(prefix.remaining_bits()).ok_or(ExceptionCode::CellUnderflow)?,
+                        key_remainder
+                    );
+                    let make_cell = match result {
+                        Ok(None) => self.mode.bit(ADD),
+                        Ok(Some(_)) => self.mode.bit(REPLACE),
+                        _ => false
+                    };
+                    if make_cell {
+                        *cell = self.gas_consumer.finalize_cell(
+                            T::make_cell_with_label_and_builder(label, bit_len, is_leaf, &builder)?
+                        )?;
+                    }
+                }
+                error @ (_, _, _) => {
+                    log::error!(
+                        target: "tvm",
+                        "If we hit this, there's certainly a bug. {:?}. \
+                        Passed: label: {}, key: {} ",
+                        error, label, key
+                    );
+                    fail!(ExceptionCode::FatalError)
+                }
+            }
         }
-    };
-    result
-}
+        result
+    }
 
-/// Slices the edge and put new leaf
-fn slice_edge<T: HashmapType + ?Sized>(
-    mut slice: SliceData,
-    bit_len: usize,
-    prefix: SliceData,
-    mut label: SliceData,
-    mut key: SliceData,
-    leaf: &BuilderData,
-    gas_consumer: &mut dyn GasConsumer
-) -> Result<BuilderData> {
-    key.shrink_data(1..);
-    let label_bit = label.get_next_bit()?;
-    let length = bit_len.checked_sub(prefix.remaining_bits() + 1).ok_or(ExceptionCode::CellUnderflow)?;
-    let is_leaf = T::is_leaf(&mut slice);
-    // Remainder of tree
-    let existing_cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_data(label, length, is_leaf, &slice)?)?;
-    // Leaf for fork
-    let another_cell = gas_consumer.finalize_cell(T::make_cell_with_label_and_builder(key, length, true, leaf)?)?;
-    let (builder, _remainder) = T::make_fork(&prefix, bit_len, existing_cell, another_cell, label_bit)?;
-    Ok(builder)
+    /// Slices the edge and puts new leaf
+    fn slice_edge(
+        &mut self,
+        mut slice: SliceData,
+        bit_len: usize,
+        prefix: SliceData,
+        mut label: SliceData,
+        mut key: SliceData,
+    ) -> Result<BuilderData> {
+        key.shrink_data(1..);
+        let label_bit = label.get_next_bit()?;
+        let length = bit_len.checked_sub(prefix.remaining_bits() + 1).ok_or(ExceptionCode::CellUnderflow)?;
+        let is_leaf = T::is_leaf(&mut slice);
+        // Remainder of tree
+        let existing_cell = self.gas_consumer.finalize_cell(T::make_cell_with_label_and_data(label, length, is_leaf, &slice)?)?;
+        // Leaf for fork
+        let another_cell = self.gas_consumer.finalize_cell(T::make_cell_with_label_and_builder(key, length, true, self.leaf)?)?;
+        let (builder, _remainder) = T::make_fork(&prefix, bit_len, existing_cell, another_cell, label_bit)?;
+        Ok(builder)
+    }
 }
 
 // remove method

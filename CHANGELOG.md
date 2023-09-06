@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.25
+
+- Optimize put_to_fork_with_mode()
+
 ## Version 2.0.24
 
 - Add BocWriterStack for faster boc saving
