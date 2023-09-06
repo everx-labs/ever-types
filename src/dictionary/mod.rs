@@ -21,7 +21,6 @@ use crate::types::{ExceptionCode, Result};
 
 pub use self::hashmap::HashmapE;
 pub use self::pfxhashmap::PfxHashmapE;
-use smallvec::SmallVec;
 
 mod hashmap;
 mod pfxhashmap;
@@ -30,94 +29,68 @@ pub type Leaf = Result<Option<SliceData>>;
 
 pub const ADD: u8 = 0x01;
 pub const REPLACE: u8 = 0x02;
-#[allow(clippy::unusual_byte_groupings)]
-const EMPTY_LABEL_MARKER: u8 = 0b00_000000;
-#[allow(clippy::unusual_byte_groupings)]
-const SHORT_LABEL_PREFIX: u8 = 0b0_0000000; // hml_short constructor, binary 0
-#[allow(clippy::unusual_byte_groupings)]
-const LONG_LABEL_PREFIX: u8 = 0b10_000000; // hml_long, binary 10
-#[allow(clippy::unusual_byte_groupings)]
-const SAME_LABEL_PREFIX: u8 = 0b11_000000; // hml_same, binary 11
 
-// hml_long$10 n:(#<= m) s:n*bit = HmLabel ~n m;
-fn hml_long(key: &SliceData, len: usize) -> Result<BuilderData> {
-    let mut label = BuilderData::with_raw(SmallVec::from_slice(&[LONG_LABEL_PREFIX]), 2)?;
-    label.append_bits(key.remaining_bits(), len)?;
-    label.append_bytestring(key)?;
-    Ok(label)
+fn hm_label_same(key: &SliceData, same: bool, max_len: usize) -> Result<BuilderData> {
+    let len = key.remaining_bits();
+    debug_assert!(len <= max_len && max_len <= 1023);
+    let k = 16 - (max_len as u16).leading_zeros() as usize;
+    // 0 <= k <= 10
+    let mut b = BuilderData::new();
+    if len > 1 && k < 2 * len - 1 {
+        // hml_same
+        b.append_bits(3, 2)?;
+        b.append_bits(same as usize, 1)?;
+        b.append_bits(len, k)?;
+    } else if k < len {
+        // hml_long
+        // (len <= 1 || len <= (k + 1) / 2) && (k < len)
+        b.append_bits(2, 2)?;
+        b.append_bits(len, k)?;
+        b.append_bits(if same { usize::MAX } else { 0 }, len)?;
+    } else {
+        // hml_short
+        // (len <= 1 || len <= (k + 1) / 2) && (k >= len)
+        b.append_bit_zero()?;
+        b.append_bits(usize::MAX - 1, len + 1)?;
+        b.append_bits(if same { usize::MAX } else { 0 }, len)?;
+    }
+    Ok(b)
 }
 
-// hml_short$0 {n:#} len:(Unary ~n) s:n*bit = HmLabel ~n m;
-fn hml_short(key: &SliceData) -> Option<BuilderData> {
-    let mut label = BuilderData::with_raw(SmallVec::from_slice(&[SHORT_LABEL_PREFIX]), 1).ok()?;
-    let length = key.remaining_bits();
-    for _ in 0..length / 32 {
-        label.append_u32(u32::MAX).ok()?;
+pub fn hm_label(key: &SliceData, max_len: usize) -> Result<BuilderData> {
+    let len = key.remaining_bits();
+    debug_assert!(len <= max_len && max_len <= 1023);
+    if len > 0 {
+        let bit = key.get_bit(0)?;
+        if same_bits(key, bit) {
+            return hm_label_same(key, bit, max_len)
+        }
     }
-    let remainder = length % 32;
-    if remainder != 0 {
-        label.append_bits(usize::MAX, remainder).ok()?;
+    let k = 16 - (max_len as u16).leading_zeros() as usize;
+    // 0 <= k <= 10
+    let mut b = BuilderData::new();
+    if k < len {
+        // hml_long
+        b.append_bits(2, 2)?;
+        b.append_bits(len, k)?;
+    } else {
+        // hml_short
+        // len <= k
+        b.append_bit_zero()?;
+        b.append_bits(usize::MAX - 1, len + 1)?;
     }
-    label.append_bit_zero().ok()?;
-    label.append_bytestring(key).ok()?;
-    Some(label)
+    b.append_bytestring(key)?;
+    Ok(b)
 }
 
-// hml_same$11 v:bit n:(#<= m) = HmLabel ~n m;
-fn hml_same(key: &SliceData, len: usize) -> Option<BuilderData> {
-    let mut zero_bit_found = false;
-    let mut one_bit_found = false;
-    let bits = key.remaining_bits();
-    for offset in 0..bits {
-        match key.get_bit_opt(offset)? {
-            false if one_bit_found => return None,
-            false => zero_bit_found = true,
-            true if zero_bit_found => return None,
-            true => one_bit_found = true,
+fn same_bits(slice: &SliceData, bit: bool) -> bool {
+    for offset in 0..slice.remaining_bits() {
+        // unwrapping is safe because offsets are all within the slice range
+        if slice.get_bit_opt(offset).unwrap() != bit {
+            return false
         }
     }
-
-    let mut label = BuilderData::with_raw(SmallVec::from_slice(&[SAME_LABEL_PREFIX]), 2).ok()?;
-    label.append_bit_bool(!zero_bit_found).ok()?;
-    label.append_bits(bits, len).ok()?;
-    Some(label)
-}
-
-pub fn hm_empty() -> Result<BuilderData> {
-    BuilderData::with_raw(SmallVec::from_slice(&[EMPTY_LABEL_MARKER]), 2)
-}
-
-pub fn hm_label(key: &SliceData, max: usize) -> Result<BuilderData> {
-    debug_assert!(max > 0 || key.is_empty());
-    if key.is_empty() || max == 0 {
-        return hm_empty()
-    }
-    let len = 16 - (max as u16).leading_zeros() as usize;
-    let length_of_long = 2 + len + key.remaining_bits(); // len == key.remaining_bits() + 1
-    let length_of_short = 1 + 2 * key.remaining_bits() + 1;
-    let length_of_same = 2 + 1 + len;
-
-    let long_label = hml_long(key, len)?;
-    debug_assert_eq!(length_of_long, long_label.length_in_bits());
-    if let Some(short_label) = hml_short(key) {
-        debug_assert_eq!(length_of_short, short_label.length_in_bits());
-        if let Some(same_label) = hml_same(key, len) {
-            debug_assert_eq!(length_of_same, same_label.length_in_bits());
-            let length = long_label.length_in_bits().min(short_label.length_in_bits());
-            if same_label.length_in_bits() < length {
-                return Ok(same_label)
-            }
-        }
-        if short_label.length_in_bits() <= long_label.length_in_bits() {
-            return Ok(short_label)
-        }
-    } else if let Some(same_label) = hml_same(key, len) {
-        debug_assert_eq!(length_of_same, same_label.length_in_bits());
-        if same_label.length_in_bits() < long_label.length_in_bits() {
-            return Ok(same_label)
-        }
-    }
-    Ok(long_label)
+    true
 }
 
 // reading hmLabel from SliceData
