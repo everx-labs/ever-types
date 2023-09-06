@@ -9,6 +9,13 @@ fn read_boc(filename: &str) -> Vec<u8> {
     bytes
 }
 
+fn bench_boc_read(c: &mut Criterion) {
+    let bytes = read_boc("src/tests/data/medium.boc");
+    c.bench_function("boc-read", |b| b.iter( || {
+        black_box(ton_types::read_single_root_boc(bytes.clone()).unwrap());
+    }));
+}
+
 fn bench_boc_write(c: &mut Criterion) {
     let bytes = read_boc("src/tests/data/medium.boc");
     let cell = ton_types::read_single_root_boc(bytes).unwrap();
@@ -160,8 +167,8 @@ criterion_group!(
     name = benches;
     config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
     targets =
+        bench_boc_read,
         bench_boc_write,
         bench_hashmap,
-    bench_hashmap,
 );
 criterion_main!(benches);

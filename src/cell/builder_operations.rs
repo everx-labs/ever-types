@@ -129,7 +129,7 @@ impl IBitstring for BuilderData {
             8..=15 => self.append_raw(&((value as u16) << (16 - bits)).to_be_bytes(), bits),
             16..=31 => self.append_raw(&((value as u32) << (32 - bits)).to_be_bytes(), bits),
             32..=63 => self.append_raw(&((value as u64) << (64 - bits)).to_be_bytes(), bits),
-            bits => unimplemented!("bits: {}", bits)
+            bits => fail!("bits: {}", bits)
         }
     }
     fn append_u8(&mut self, value: u8) -> Result<&mut Self> {
