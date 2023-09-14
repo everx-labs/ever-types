@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.27
+
+- Make SliceData::with_bitstring() public
+
 ## Version 2.0.26
 
 - Optimize hashmap labels

@@ -128,7 +128,7 @@ impl SliceData {
         }
     }
 
-    pub(super) fn with_bitstring(data: impl Into<SmallData>, length_in_bits: usize) -> Self {
+    pub fn with_bitstring(data: impl Into<SmallData>, length_in_bits: usize) -> Self {
         Self {
             data: InternalData::Data(data.into(), length_in_bits.min(super::MAX_DATA_BITS)),
             references_window: 0..0,
