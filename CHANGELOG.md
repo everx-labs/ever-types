@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.28
+
+- Fixed persistant state save
+
 ## Version 2.0.27
 
 - Make SliceData::with_bitstring() public
