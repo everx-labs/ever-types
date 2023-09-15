@@ -133,7 +133,7 @@ impl<'a> BocWriter<'a, SimpleOrderedCellsStorage> {
 
 struct IntermediateState {
     file: File,
-    cell_sizes: Vec<u8>,
+    cell_sizes: Vec<u16>,
     ref_count: usize,
     total_size: u64,
     raw_cell_size: usize,
@@ -214,7 +214,7 @@ impl BocWriterStack {
         dest.write_all(&(0u64).to_be_bytes()[(8-ref_size)..8])?;
 
         // Cells
-        let mut cell_buffer = [0; 2 + MAX_DATA_BYTES + 4 * TEMP_REF_SIZE];
+        let mut cell_buffer = [0; 2 + 4 * (SHA256_SIZE + DEPTH_SIZE) + MAX_DATA_BYTES + 4 * TEMP_REF_SIZE];
         for &cell_size in state.cell_sizes.iter().rev() {
             check_abort(abort)?;
             state.total_size -= cell_size as u64;
@@ -283,7 +283,7 @@ impl BocWriterStack {
 
         //vec of cell sizes
         //todo we can write cell size after cell. So at the end of file we will have the size of last cell
-        let mut cell_sizes: Vec<u8> = Vec::<u8>::with_capacity(FILE_BUFFER_LEN);
+        let mut cell_sizes: Vec<u16> = Vec::<u16>::with_capacity(FILE_BUFFER_LEN);
         //total size of all cells and its references
         let mut total_size: u64 = 0;
         //all references count in boc
@@ -360,7 +360,7 @@ impl BocWriterStack {
                     //update counters
                     let raw_cell = full_len(loaded.cell.raw_data()?);
                     let cell_size = raw_cell + TEMP_REF_SIZE * loaded.cell.references_count();
-                    cell_sizes.push(cell_size as u8);
+                    cell_sizes.push(cell_size as u16);
                     ref_count += loaded.cell.references_count();
                     total_size += cell_size as u64;
                     raw_cell_size   += raw_cell;
