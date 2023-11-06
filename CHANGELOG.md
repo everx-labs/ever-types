@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.29
+
+- Remove BuilderData::level_mask (compute it at finalization)
+
 ## Version 2.0.28
 
 - Fixed persistant state save

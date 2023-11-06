@@ -32,7 +32,6 @@ pub struct BuilderData {
     length_in_bits: usize,
     pub(super) references: SmallVec<[Cell; 4]>,
     pub(super) cell_type: CellType,
-    pub(super) level_mask: LevelMask,
 }
 
 impl BuilderData {
@@ -45,7 +44,6 @@ impl BuilderData {
             length_in_bits: 0,
             references: SmallVec::new_const(),
             cell_type: CellType::Ordinary,
-            level_mask: LevelMask(0),
         }
     }
 
@@ -74,7 +72,6 @@ impl BuilderData {
             length_in_bits,
             references: SmallVec::new(),
             cell_type: CellType::Ordinary,
-            level_mask: LevelMask::with_mask(0),
         })
     }
 
@@ -114,23 +111,32 @@ impl BuilderData {
     }
     /// use max_depth to limit depth
     pub fn finalize(mut self, max_depth: u16) -> Result<Cell> {
-        if self.cell_type == CellType::Big {
-            fail!("Big cell creation by builder is prohibited");
+        let mut children_level_mask = LevelMask::with_level(0);
+        for r in self.references.iter() {
+            children_level_mask |= r.level_mask();
         }
-        if self.cell_type == CellType::Ordinary {
-            // For Ordinary cells - level is set automatically,
-            // for other types - it must be set manually by set_level_mask()
-            for r in self.references.iter() {
-                self.level_mask |= r.level_mask();
+        let level_mask = match self.cell_type {
+            CellType::Unknown => fail!("failed to finalize a cell of unknown type"),
+            CellType::Ordinary => children_level_mask,
+            CellType::PrunedBranch => {
+                if self.bits_used() < 16 {
+                    fail!("failed to get level mask for pruned branch cell");
+                }
+                // mask validity gets checked later
+                LevelMask::with_mask(self.data[1])
             }
-        }
+            CellType::LibraryReference => LevelMask::with_level(0),
+            CellType::MerkleProof | CellType::MerkleUpdate =>
+                children_level_mask.virtualize(1),
+            CellType::Big => fail!("Big cell creation by builder is prohibited"),
+        };
         append_tag(&mut self.data, self.length_in_bits);
 
         Ok(Cell::with_cell_impl(DataCell::with_params(
             self.references.to_vec(),
             &self.data,
             self.cell_type,
-            self.level_mask.mask(),
+            level_mask.mask(),
             Some(max_depth),
             None,
             None,
@@ -167,7 +173,6 @@ impl BuilderData {
         let mut builder = BuilderData::with_raw(data, cell.bit_length())?;
         builder.references = cell.clone_references();
         builder.cell_type = cell.cell_type();
-        builder.level_mask = cell.level_mask();
         Ok(builder)
     }
 
@@ -292,18 +297,6 @@ impl BuilderData {
         }
     }
 
-    pub fn level(&self) -> u8 {
-        self.level_mask.level()
-    }
-
-    pub fn level_mask(&self) -> LevelMask {
-        self.level_mask
-    }
-
-    pub fn level_mask_mut(&mut self) -> &mut LevelMask {
-        &mut self.level_mask
-    }
-
     pub fn checked_append_reference(&mut self, cell: Cell) -> Result<&mut Self> {
         if self.references_free() == 0 {
             fail!(ExceptionCode::CellOverflow)
@@ -345,10 +338,6 @@ impl BuilderData {
         // TODO: big cells ?
 
         self.cell_type = cell_type;
-    }
-
-    pub fn set_level_mask(&mut self, mask: LevelMask) {
-        self.level_mask = mask;
     }
 
     pub fn is_empty(&self) -> bool {

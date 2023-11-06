@@ -140,9 +140,6 @@ impl SliceData {
         if builder.cell_type != CellType::Ordinary {
             fail!("cell type should be ordinary but it is {}", builder.cell_type)
         }
-        if builder.level_mask != LevelMask::default() {
-            fail!("should not have any level mask it has {}", builder.level_mask)
-        }
         if builder.length_in_bits() > super::MAX_DATA_BITS {
             fail!("length should be less or equal to {} but it is {}", super::MAX_DATA_BITS, builder.length_in_bits())
         }
@@ -352,13 +349,11 @@ impl SliceData {
     /// constructs builder trunking original cell regarding window settings
     pub fn into_builder(self) -> BuilderData {
         let cell_type = self.cell_type();
-        let level_mask = self.level_mask();
         let slice = &self;
         let refs: SmallVec<[Cell; 4]> = (0..self.remaining_references()).map(|index| slice.reference(index).unwrap()).collect::<SmallVec<_>>();
         let (data, length_in_bits) = self.remaining_data();
         let mut builder = BuilderData::with_raw_and_refs(data, length_in_bits, refs).unwrap();
         builder.cell_type = cell_type;
-        builder.level_mask = level_mask;
         builder
     }
 
