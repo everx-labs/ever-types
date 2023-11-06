@@ -63,8 +63,12 @@ impl LevelMask {
         })
     }
 
+    pub fn is_valid(mask: u8) -> bool {
+        mask <= 7
+    }
+
     pub fn with_mask(mask: u8) -> Self {
-        if mask <= 7 {
+        if Self::is_valid(mask) {
             LevelMask(mask)
         } else {
             log::error!("{} {}", file!(), line!());
@@ -77,7 +81,7 @@ impl LevelMask {
     }
 
     pub fn level(&self) -> u8 {
-        if self.0 > 7 {
+        if !Self::is_valid(self.0) {
             log::error!("{} {}", file!(), line!());
             255
         } else {
