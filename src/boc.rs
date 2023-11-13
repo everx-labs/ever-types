@@ -1137,7 +1137,7 @@ impl<'a> BocReader<'a> {
         cell_index: usize,
         cells_count: usize,
         remaining_big_cells: &mut usize,
-    ) -> Result<RawCell> where T: Read {
+    ) -> Result<RawCell> where T: Read + Rest {
         let mut refs = [0; 4];
         let mut data;
         let mut d1d2 = [0_u8; 2];
@@ -1151,6 +1151,11 @@ impl<'a> BocReader<'a> {
             if len > MAX_BIG_DATA_BYTES {
                 fail!("big cell data length {} is too big", len);
             }
+            let rest = src.rest()?;
+            if len > rest as usize {
+                fail!("big cell data length {} is too big (data rest is {})", len, rest);
+            }
+
             data = vec!(0; 1 + 3 + len);
             data[0] = d1d2[0];
             data[1] = (len >> 16) as u8;
@@ -1305,6 +1310,19 @@ impl<'a, T> Read for IoCrcFilter<'a, T> where T: Read {
         let res = self.io_object.read(buf);
         self.hasher.update(buf);
         res
+    }
+}
+
+trait Rest {
+    fn rest(&mut self) -> Result<u64>;
+}
+
+impl<'a, T> Rest for IoCrcFilter<'a, T> where T: Seek {
+    fn rest(&mut self) -> Result<u64> {
+        let p = self.io_object.stream_position()?;
+        let rest = self.io_object.seek(SeekFrom::End(0))? - p;
+        self.io_object.seek(SeekFrom::Start(p))?;
+        Ok(rest)
     }
 }
 
