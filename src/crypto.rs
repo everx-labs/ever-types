@@ -18,6 +18,7 @@ use crate::{
     Ed25519PrivateKey, sha256_digest_slices, x25519_shared_secret
 };
 use std::{convert::TryInto, fmt::{self, Debug, Display, Formatter}, sync::Arc};
+use super::bls::{BLS_PUBLIC_KEY_LEN, BLS_SECRET_KEY_LEN};
 
 pub trait KeyOption: Sync + Send + Debug {
     fn id(&self) -> &Arc<KeyId>;
@@ -213,6 +214,132 @@ impl KeyOption for Ed25519KeyOption {
 
 }
 
+#[derive(Debug)]
+pub struct BlsKeyOption {
+    id: Arc<KeyId>,
+    pub_key: [u8; BLS_PUBLIC_KEY_LEN],
+    pvt_key: Option<[u8; BLS_SECRET_KEY_LEN]>
+}
+
+impl BlsKeyOption {
+    pub const KEY_TYPE: i32 = 007;
+
+    pub fn generate_with_json() -> Result<(KeyOptionJson, Arc<dyn KeyOption>)> {
+        let key = Self::generate()?;
+        let json = KeyOptionJson {
+            type_id: Self::KEY_TYPE,
+            pub_key: Some(base64::encode(&key.pub_key)),
+            pvt_key: key.pvt_key.map(|val| base64::encode(val))
+        };
+
+        Ok((json, Arc::new(key)))
+    }
+
+    pub fn from_private_key_json(json: &KeyOptionJson) -> Result<Arc<dyn KeyOption>> {
+        let pub_key: [u8; BLS_PUBLIC_KEY_LEN] = match &json.pub_key {
+            Some(pub_key) => {
+                let pub_key = base64::decode(pub_key)?;
+                pub_key.as_slice().try_into()?
+            },
+            None => fail!("Bad public key")
+        };
+
+        let pvt_key: [u8; BLS_SECRET_KEY_LEN] = match &json.pvt_key {
+            Some(pvt_key) => {
+                let pvt_key = base64::decode(pvt_key)?;
+                pvt_key.as_slice().try_into()?
+            },
+            None => fail!("Bad private key")
+        };
+
+        Ok(Arc::new(Self {
+            id: Self::calc_id(&pub_key),
+             pub_key: pub_key,
+            pvt_key: Some(pvt_key)
+        }))
+    }
+
+    pub fn from_public_key(pub_key: [u8; BLS_PUBLIC_KEY_LEN]) -> Arc<dyn KeyOption> {
+        Arc::new(
+            Self {
+                id: Self::calc_id(&pub_key), 
+                pub_key: pub_key, 
+                pvt_key: None
+            }
+        )
+    }
+
+    fn generate() -> Result<Self> {
+        let (pub_key, pvt_key) = super::bls::gen_bls_key_pair()?;
+        Ok(Self {
+            id: Self::calc_id(&pub_key),
+            pub_key: pub_key,
+            pvt_key: Some(pvt_key)
+        })
+    }
+
+    fn calc_id(pub_key: &[u8; BLS_PUBLIC_KEY_LEN]) -> Arc<KeyId> {
+        let data = sha256_digest_slices(&[pub_key]);
+        KeyId::from_data(data)
+    }
+
+    fn pvt_key(&self) -> Result<&[u8; BLS_SECRET_KEY_LEN]> {
+        match &self.pvt_key {
+            Some(pvt_key) => Ok(pvt_key), 
+            None => fail!("private bls key was not found!")
+        }
+    }
+}
+
+impl KeyOption for BlsKeyOption {
+    /// Get key id
+    fn id(&self) -> &Arc<KeyId> {
+        &self.id
+    }
+    /// Get type id 
+    fn type_id(&self) -> i32 {
+        Self::KEY_TYPE
+    }
+
+    /// Get public key
+    fn pub_key(&self) -> Result<&[u8]> {
+        Ok(self.pub_key.as_ref())
+    }
+
+    /// Calculate simple signature
+    fn sign(&self, data: &[u8]) -> Result<Vec<u8>> {
+        let sign = super::bls::sign(self.pvt_key()?, &data.to_vec())?;
+        Ok(sign.try_into()?)
+    }
+
+    /// Verify signature
+    fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()> {
+        let status = super::bls::verify(
+            signature.try_into()?, 
+            &data.to_vec(), &self.pub_key
+        )?;
+
+        if !status {
+            fail!("bad signature!");
+        }
+
+        Ok(())
+    }
+
+    #[cfg(feature = "export_key")]
+    fn export_key(&self) -> Result<&[u8]> {
+        match self.pvt_key.as_ref() {
+            Some(pvt_key) => Ok(pvt_key),
+            None => fail!("pvt_key is None")
+        }
+    }
+
+    fn shared_secret(&self, _other_pub_key: &[u8]) -> Result<[u8; 32]> {
+        fail!("shared_secret not implemented for BlsKeyOption!")
+    }
+
+}
+
 /// ADNL key ID (node ID)
 #[derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 pub struct KeyId([u8; 32]);
@@ -237,4 +364,10 @@ pub struct KeyOptionJson {
     type_id: i32,
     pub_key: Option<String>,
     pvt_key: Option<String>,
+}
+
+impl KeyOptionJson {
+    pub fn type_id(&self) -> &i32 {
+        &self.type_id
+    }
 }
