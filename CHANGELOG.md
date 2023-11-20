@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.31
+
+- Add BLS KeyOption from ever-crypto
+
 ## Version 2.0.30
 
 - Fixed performance issue with fake 16MB big cell

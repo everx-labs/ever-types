@@ -30,6 +30,9 @@ use smallvec::SmallVec;
 pub mod wrappers;
 pub use self::wrappers::*;
 
+pub mod bls;
+pub use bls::*;
+
 include!("../common/src/info.rs");
 
 pub trait Mask {
