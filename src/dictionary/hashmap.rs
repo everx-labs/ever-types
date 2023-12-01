@@ -237,3 +237,6 @@ impl IntoIterator for &HashmapE {
     }
 }
 
+#[cfg(test)]
+#[path = "tests/test_hashmap.rs"]
+mod tests;

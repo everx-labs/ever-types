@@ -1689,3 +1689,6 @@ impl<T: HashmapType + ?Sized> Iterator for HashmapIterator<T> {
     }
 }
 
+#[cfg(test)]
+#[path = "tests/test_dictionary.rs"]
+mod tests;
