@@ -805,6 +805,24 @@ impl SliceData {
         }
     }
 
+    #[cfg(test)]
+    fn is_full_cell_slice(&self) -> bool {
+        match &self.data {
+            InternalData::None => true,
+            InternalData::Cell(cell) => {
+                self.data_window.start == 0
+                    && self.data_window.end == cell.bit_length()
+                    && self.references_window.start == 0
+                    && self.references_window.end == cell.references_count()
+            }
+            InternalData::Data(_data, length_in_bits, ) => {
+                self.data_window.start == 0
+                    && self.data_window.end == *length_in_bits
+                    && self.references_window.start == 0
+                    && self.references_window.end == 0
+            }
+        }
+    }
 }
 
 /// subject to move to tests
@@ -873,3 +891,6 @@ impl fmt::UpperHex for SliceData {
     }
 }
 
+#[cfg(test)]
+#[path = "tests/test_slice.rs"]
+mod tests;

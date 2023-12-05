@@ -532,6 +532,18 @@ impl Deref for Cell {
     }
 }
 
+#[cfg(test)]
+impl Cell {
+    pub fn read_from_file(file_name: &str) -> Self {
+        let mut file = std::fs::File::open(file_name).unwrap();
+        crate::BocReader::new().read(&mut file).unwrap().withdraw_single_root().unwrap()
+    }
+    pub fn write_to_file(&self, file_name: &str) {
+        let mut file = std::fs::File::create(file_name).unwrap();
+        crate::BocWriter::with_root(self).unwrap().write(&mut file).unwrap();
+    }
+}
+
 impl Default for Cell {
     fn default() -> Self {
         CELL_DEFAULT.clone()
@@ -1085,6 +1097,8 @@ impl CellData {
         } else {
             build_cell_buf(cell_type, data, level_mask, refs as usize, store_hashes, hashes.clone(), depths)?
         };
+        #[cfg(test)]
+        check_cell_buf(&buffer[..], false)?;
         let hashes_count = if cell_type == CellType::PrunedBranch {
             1
         } else {
@@ -1960,3 +1974,6 @@ pub fn create_big_cell(data: &[u8]) -> Result<Cell> {
     ))
 }
 
+#[cfg(test)]
+#[path = "tests/test_cell.rs"]
+mod tests;

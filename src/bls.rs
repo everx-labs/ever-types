@@ -633,3 +633,6 @@ impl BlsSignature {
     }
 }
 
+#[cfg(test)]
+#[path = "tests/test_bls.rs"]
+mod tests;

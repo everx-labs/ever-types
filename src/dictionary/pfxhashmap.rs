@@ -273,3 +273,6 @@ impl HashmapType for PfxHashmapE {
 
 impl HashmapRemover for PfxHashmapE {}
 
+#[cfg(test)]
+#[path = "tests/test_pfxhashmap.rs"]
+mod tests;
