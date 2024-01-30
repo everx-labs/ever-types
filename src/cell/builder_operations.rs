@@ -164,3 +164,6 @@ impl IBitstring for BuilderData {
     }
 }
 
+#[cfg(test)]
+#[path = "tests/test_builder.rs"]
+mod tests;

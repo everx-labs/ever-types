@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.32
+
+- Add ability to get root of changed subtree during hashmap filter
+
 ## Version 2.0.31
 
 - Add BLS KeyOption from ever-crypto

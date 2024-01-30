@@ -356,6 +356,12 @@ impl BuilderData {
 }
 
 // use only for test purposes
+#[cfg(test)]
+impl BuilderData {
+    pub(crate) fn append_reference(&mut self, child: BuilderData) {
+        self.references.push(child.into_cell().unwrap());
+    }
+}
 
 impl fmt::Display for BuilderData {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

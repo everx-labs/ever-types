@@ -445,3 +445,6 @@ impl<T: std::io::Read> ByteOrderRead for T {
 
 pub type Bitmask = u8;
 
+#[cfg(test)]
+#[path = "tests/test_types.rs"]
+mod tests;
