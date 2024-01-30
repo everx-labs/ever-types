@@ -1326,3 +1326,6 @@ impl<'a, T> Rest for IoCrcFilter<'a, T> where T: Seek {
     }
 }
 
+#[cfg(test)]
+#[path = "tests/test_boc.rs"]
+mod tests;
