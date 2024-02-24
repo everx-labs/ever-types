@@ -15,7 +15,6 @@ ed25519-dalek = { features = [ 'hazmat', 'rand_core' ], version = '2.0' }
 failure = '0.1.6'
 hex = '0.4'
 lazy_static = '1.4'
-lockfree = { git = 'https://github.com/tonlabs/lockfree.git' }
 log = '0.4'
 num = '0.4'
 num-derive = '0.3'
@@ -26,6 +25,7 @@ serde_json = '1.0'
 sha2 = '0.10'
 smallvec = { features = [ 'const_new', 'union', 'write' ], version = '1.10' }
 x25519-dalek = '2.0'
+lockfree = { git = 'https://github.com/tonlabs/lockfree.git' }
 
 [dev-dependencies]
 criterion = '0.4'
