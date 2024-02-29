@@ -278,6 +278,10 @@ impl Cell {
         CELL_COUNT.load(Ordering::Relaxed)
     }
 
+    pub fn cell_impl(&self) -> &Arc<dyn CellImpl> {
+        &self.0
+    }
+
     // pub fn finalization_nanos() -> u64 {
     //     FINALIZATION_NANOS.load(Ordering::Relaxed)
     // }
