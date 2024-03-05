@@ -151,6 +151,10 @@ impl BuilderData {
         &self.data
     }
 
+    pub fn cell_type(&self) -> CellType {
+        self.cell_type
+    }
+
     pub fn compare_data(&self, other: &Self) -> Result<(Option<usize>, Option<usize>)> {
         if self == other {
             return Ok((None, None));
