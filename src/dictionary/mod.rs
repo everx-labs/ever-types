@@ -1,5 +1,5 @@
 /*
-* Copyright (C) 2019-2023 EverX. All Rights Reserved.
+* Copyright (C) 2019-2024 EverX. All Rights Reserved.
 *
 * Licensed under the SOFTWARE EVALUATION License (the "License"); you may not use
 * this file except in compliance with the License.
@@ -787,8 +787,9 @@ fn dict_combine_with<T: HashmapType + ?Sized>(
                 let left2 = cursor2.checked_drain_reference()?;
                 let mut right1 = cursor1.checked_drain_reference()?;
                 let right2 = cursor2.checked_drain_reference()?;
-                if dict_combine_with_cell::<T>(&mut left1, left2, bit_len1 - 1)? |
-                    dict_combine_with_cell::<T>(&mut right1, right2, bit_len1 - 1)? {
+                let res1 = dict_combine_with_cell::<T>(&mut left1, left2, bit_len1 - 1)?;
+                let res2 = dict_combine_with_cell::<T>(&mut right1, right2, bit_len1 - 1)?;
+                if res1 || res2 {
                     *cell1 = T::make_fork(&label1, bit_len, left1, right1, false)?.0.into_cell()?;
                     return Ok(true)
                 }
@@ -1305,10 +1306,16 @@ pub trait HashmapRemover: HashmapType + Clone + Sized {
     // closure must return decision for item to accept it or to remove it
     fn hashmap_filter<F>(&mut self, mut func: F) -> Result<()>
     where F: FnMut(&BuilderData, SliceData) -> Result<HashmapFilterResult> {
+        self.hashmap_filter_with_root(|key, data, _root| func(key, data))
+    }
+    // removes items from hashamp in one pass
+    // closure must return decision for item to accept it or to remove it
+    fn hashmap_filter_with_root<F>(&mut self, mut func: F) -> Result<()>
+    where F: FnMut(&BuilderData, SliceData, Option<&Cell>) -> Result<HashmapFilterResult> {
         let bit_len = self.bit_len();
         let mut result = HashmapFilterResult::Accept;
         if let Some(cell) = self.data() {
-            let (removed, res) = filter_next::<Self, _>(cell.clone(), BuilderData::default(), bit_len, &mut result, &mut func)?;
+            let (removed, res) = filter_next::<Self, _>(cell.clone(), BuilderData::default(), bit_len, &mut result, None, &mut func)?;
             if removed {
                 *self.data_mut() = res.map(|res| res.cell);
                 self.after_remove()?;
@@ -1375,11 +1382,12 @@ fn filter_next<T, F>(
     key: BuilderData,
     mut bit_len: usize,
     result: &mut HashmapFilterResult,
+    mut root: Option<Cell>,
     func: &mut F,
 ) -> Result<(bool, Option<ForkComponent>)> // is_removed and remainder
 where
     T: HashmapType + ?Sized,
-    F: FnMut(&BuilderData, SliceData) -> Result<HashmapFilterResult>
+    F: FnMut(&BuilderData, SliceData, Option<&Cell>) -> Result<HashmapFilterResult>
 {
     if result == &HashmapFilterResult::Cancel {
         return Ok((false, None));
@@ -1394,7 +1402,7 @@ where
     let key = LabelReader::read_label_raw(&mut cursor, &mut bit_len, key)?;
     let remainder = cursor.clone();
     if bit_len == 0 {
-        let removed = match func(&key, cursor)? {
+        let removed = match func(&key, cursor, root.as_ref())? {
             HashmapFilterResult::Remove => {
                 return Ok((true, None))
             }
@@ -1412,14 +1420,17 @@ where
     for i in 0..2 {
         let mut key = key.clone();
         key.append_bit_bool(i == 1)?;
-        let cell = cursor.checked_drain_reference()?;
-        let (removed, remainder) = filter_next::<T, F>(cell, key, bit_len, result, func)?;
+        let child = cursor.checked_drain_reference()?;
+        let (removed, remainder) = filter_next::<T, F>(child, key, bit_len, result, root.clone(), func)?;
         if result == &HashmapFilterResult::Cancel {
             return Ok((false, None))
         }
         changed |= removed;
         if let Some(remainder) = remainder {
             next.push(remainder);
+        }
+        if changed && root.is_none() {
+            root = Some(cell.clone());
         }
     }
     if !changed {
