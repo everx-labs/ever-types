@@ -365,6 +365,7 @@ impl ExceptionCode {
 
 pub trait ByteOrderRead {
     fn read_be_uint(&mut self, bytes: usize) -> std::io::Result<u64>;
+    fn read_le_uint(&mut self, bytes: usize) -> std::io::Result<u64>;
     fn read_byte(&mut self) -> std::io::Result<u8>;
     fn read_be_u16(&mut self) -> std::io::Result<u16>;
     fn read_be_u32(&mut self) -> std::io::Result<u32>;
@@ -377,29 +378,11 @@ pub trait ByteOrderRead {
 
 impl<T: std::io::Read> ByteOrderRead for T {
     fn read_be_uint(&mut self, bytes: usize) -> std::io::Result<u64> {
-        match bytes {
-            1 => {
-                let mut buf = [0];
-                self.read_exact(&mut buf)?;
-                Ok(buf[0] as u64)
-            }
-            2 => {
-                let mut buf = [0; 2];
-                self.read_exact(&mut buf)?;
-                Ok(u16::from_be_bytes(buf) as u64)
-            }
-            3..=4 => {
-                let mut buf = [0; 4];
-                self.read_exact(&mut buf[4 - bytes..])?;
-                Ok(u32::from_be_bytes(buf) as u64)
-            },
-            5..=8 => {
-                let mut buf = [0; 8];
-                self.read_exact(&mut buf[8 - bytes..])?;
-                Ok(u64::from_be_bytes(buf))
-            },
-            _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "too many bytes to read in u64")),
-        }
+        read_uint(self, bytes, false)
+    }
+
+    fn read_le_uint(&mut self, bytes: usize) -> std::io::Result<u64> {
+        read_uint(self, bytes, true)
     }
 
     fn read_byte(&mut self) -> std::io::Result<u8> {
@@ -440,6 +423,49 @@ impl<T: std::io::Read> ByteOrderRead for T {
         let mut buf = [0; 32];
         self.read_exact(&mut buf)?;
         Ok(buf)
+    }
+}
+
+fn read_uint<T: std::io::Read>(src: &mut T, bytes: usize, le: bool) -> std::io::Result<u64> {
+    match bytes {
+        1 => {
+            let mut buf = [0];
+            src.read_exact(&mut buf)?;
+            Ok(buf[0] as u64)
+        }
+        2 => {
+            let mut buf = [0; 2];
+            src.read_exact(&mut buf)?;
+            if le {
+                Ok(u16::from_le_bytes(buf) as u64)
+            } else {
+                Ok(u16::from_be_bytes(buf) as u64)
+            }
+        }
+        3..=4 => {
+            let mut buf = [0; 4];
+            if le {
+                src.read_exact(&mut buf[0..bytes])?;
+                Ok(u32::from_le_bytes(buf) as u64)
+            } else {
+                src.read_exact(&mut buf[4 - bytes..])?;
+                Ok(u32::from_be_bytes(buf) as u64)
+            }
+        },
+        5..=8 => {
+            let mut buf = [0; 8];
+            if le {
+                src.read_exact(&mut buf[0..bytes])?;
+                Ok(u64::from_le_bytes(buf))
+            } else {
+                src.read_exact(&mut buf[8 - bytes..])?;
+                Ok(u64::from_be_bytes(buf))
+            }
+        },
+        n => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("too many bytes ({}) to read in u64", n),
+        )),
     }
 }
 

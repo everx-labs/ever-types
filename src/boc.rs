@@ -714,6 +714,7 @@ pub struct BocReader<'a> {
     indexed_cells: Box<dyn IndexedCellsStorage>,
     done_cells: Box<dyn DoneCellsStorage>,
     max_depth: u16,
+    allow_big_cells: bool,
 }
 
 impl<'a> Default for BocReader<'a> {
@@ -723,6 +724,7 @@ impl<'a> Default for BocReader<'a> {
             indexed_cells: Box::<HashMap::<u32, RawCell>>::default(),
             done_cells: Box::<HashMap::<u32, Cell>>::default(),
             max_depth: MAX_SAFE_DEPTH,
+            allow_big_cells: false,
         }
     }
 }
@@ -759,7 +761,12 @@ impl<'a> BocReader<'a> {
         self
     }
 
-    pub fn read<T: Read + Seek>(mut self, src: &mut T) -> Result<BocReaderResult> {
+    pub fn set_allow_big_cells(&mut self, val: bool) -> &mut Self {
+        self.allow_big_cells = val;
+        self
+    }
+
+    pub fn read<T: Read + Seek>(&mut self, src: &mut T) -> Result<BocReaderResult> {
         #[cfg(not(target_family = "wasm"))]
         let now = std::time::Instant::now();
 
@@ -770,7 +777,7 @@ impl<'a> BocReader<'a> {
         // TODO do not compute crc if header says crc isn't included
         let mut src = IoCrcFilter::new_reader(src);
 
-        let header = Self::read_header(&mut src)?;
+        let header = self.read_header(&mut src)?;
         let header_len = src.stream_position()? - position;
 
         check_abort(self.abort)?;
@@ -856,13 +863,13 @@ impl<'a> BocReader<'a> {
         Ok(BocReaderResult { roots, header })
     }
 
-    pub fn read_inmem(mut self, data: Arc<Vec<u8>>) -> Result<BocReaderResult> {
+    pub fn read_inmem(&mut self, data: Arc<Vec<u8>>) -> Result<BocReaderResult> {
         #[cfg(not(target_family = "wasm"))]
         let now = std::time::Instant::now();
         let mut src = Cursor::new(data.deref());
     
-        let header = Self::read_header(&mut src)?;
-    
+        let header = self.read_header(&mut src)?;
+
         Self::precheck_cells_tree_len(&header, src.position(), data.len() as u64, false)?;
     
         // Index processing - read existing index or traverse all vector to create own index2
@@ -972,7 +979,7 @@ impl<'a> BocReader<'a> {
         })
     }
 
-    fn read_header<T>(src: &mut T) -> Result<BocHeader> where T: Read {
+    fn read_header<T>(&self, src: &mut T) -> Result<BocHeader> where T: Read {
         let magic = src.read_be_u32()?;
         let first_byte = src.read_byte()?;
         let index_included;
@@ -1048,6 +1055,12 @@ impl<'a> BocReader<'a> {
             let big_cells_count = src.read_be_uint(ref_size)? as usize;
             let big_cells_size = src.read_be_uint(offset_size)? as usize;
 
+            if big_cells_count == 0 {
+                fail!("big cells count is zero but header has magic which indicates that big cells are present");
+            }
+            if !self.allow_big_cells {
+                fail!("BOC contains big cells, but BocReader is configured to reject them");
+            }
             if big_cells_count > cells_count {
                 fail!("big_cells_count ({}) is too big with respect to cells_count ({})", 
                     big_cells_count, cells_count);

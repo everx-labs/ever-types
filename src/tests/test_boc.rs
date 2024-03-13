@@ -289,10 +289,14 @@ fn test_tree_of_cells_serialization_deserialization() -> Result<()> {
         let mut data = Vec::new();
         BocWriter::with_root(&root)?.write_ex(&mut data, *include_index, true, None, None)?;
 
-        let root_restored = BocReader::new().read(&mut Cursor::new(&data))?.withdraw_single_root()?;
+        let root_restored = BocReader::new()
+            .set_allow_big_cells(true)
+            .read(&mut Cursor::new(&data))?.withdraw_single_root()?;
         assert_eq!(root, root_restored);
 
-        let root_restored = BocReader::new().read_inmem(Arc::new(data))?.withdraw_single_root()?;
+        let root_restored = BocReader::new()
+            .set_allow_big_cells(true)
+            .read_inmem(Arc::new(data))?.withdraw_single_root()?;
         assert_eq!(root, root_restored);
     }
 
