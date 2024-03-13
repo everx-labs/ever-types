@@ -2,7 +2,7 @@
 build = 'common/build/build.rs'
 edition = '2021'
 name = 'ton_types'
-version = '2.0.34'
+version = '2.0.35'
 
 [dependencies]
 aes-ctr = '0.6'
@@ -32,6 +32,8 @@ criterion = '0.4'
 pretty_assertions = '1.3'
 
 [features]
+cell_counter = [  ]
+default = [ 'cell_counter' ]
 export_key = [  ]
 
 [[bench]]

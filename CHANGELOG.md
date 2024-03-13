@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.35
+
+- The code related to cell counting was covered by the `cell_counter` feature.
+  Disable counting allows to increase cell's synthetic performance, 
+  but the counting is very needed for memory usage diagnostics.
+
 ## Version 2.0.34
 
 - Generate BLS key based on key material

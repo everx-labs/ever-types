@@ -241,6 +241,7 @@ impl Clone for Cell {
     }
 }
 
+#[cfg(feature = "cell_counter")]
 impl Drop for Cell {
     fn drop(&mut self) {
         CELL_COUNT.fetch_sub(1, Ordering::Relaxed);
@@ -264,18 +265,25 @@ impl Cell {
 
     pub fn with_cell_impl<T: 'static + CellImpl>(cell_impl: T) -> Self {
         let ret = Cell(Arc::new(cell_impl));
+        #[cfg(feature = "cell_counter")]
         CELL_COUNT.fetch_add(1, Ordering::Relaxed);
-        ret  
+        ret
     }
 
     pub fn with_cell_impl_arc(cell_impl: Arc<dyn CellImpl>) -> Self {
         let ret = Cell(cell_impl);
+        #[cfg(feature = "cell_counter")]
         CELL_COUNT.fetch_add(1, Ordering::Relaxed);
         ret
     }
 
     pub fn cell_count() -> u64 {
-        CELL_COUNT.load(Ordering::Relaxed)
+        #[cfg(feature = "cell_counter")] {
+            CELL_COUNT.load(Ordering::Relaxed)
+        }
+        #[cfg(not(feature = "cell_counter"))] {
+            0
+        }
     }
 
     pub fn cell_impl(&self) -> &Arc<dyn CellImpl> {
