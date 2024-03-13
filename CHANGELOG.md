@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.36
+
+- Added `BocReader::set_allow_big_cells` method
+- Supported big cell data serialization in `CellData::serialize` & `CellData::deserialize` 
+  (the functions are not used in boc, they need in node)
+
 ## Version 2.0.35
 
 - The code related to cell counting was covered by the `cell_counter` feature.

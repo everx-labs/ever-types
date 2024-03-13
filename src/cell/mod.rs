@@ -11,7 +11,7 @@
 * limitations under the License.
 */
 
-use crate::{error, fail, Sha256, types::{ExceptionCode, Result, UInt256, ByteOrderRead}};
+use crate::{error, fail, Sha256, types::{ExceptionCode, Result, UInt256, ByteOrderRead}, sha256_digest};
 use std::{
     cmp::{max, min}, collections::HashSet, convert::TryInto, fmt::{self, Display, Formatter}, 
     io::{Read, Write, ErrorKind}, ops::{BitOr, BitOrAssign, Deref}, 
@@ -1248,42 +1248,47 @@ impl CellData {
     /// Binary serialization of cell data.
     /// Strange things here were made for compatibility
     pub fn serialize<T: Write>(&self, writer: &mut T) -> Result<()> {
-        let bitlen = self.bit_length();
         writer.write_all(&[self.cell_type().to_u8().unwrap()])?;
-        writer.write_all(&(bitlen as u16).to_le_bytes())?;
-        writer.write_all(&self.data()[0..bitlen / 8 + (bitlen % 8 != 0) as usize])?;
-        if bitlen % 8 == 0 {
-            writer.write_all(&[0])?;// for compatibility
-        }
-        writer.write_all(&[self.level_mask().0])?;
-        writer.write_all(&[self.store_hashes() as u8])?;
-        let hashes_count = hashes_count(self.buf.unbounded_data());
-        writer.write_all(&[1])?;
-        writer.write_all(&[hashes_count as u8])?;
-        if self.store_hashes() {
-            for i in 0..hashes_count {
-                let hash = hash(self.buf.unbounded_data(), i);
-                writer.write_all(hash)?;
-            }
+        if self.cell_type() == CellType::Big {
+            writer.write_all(&self.data().len().to_le_bytes()[0..3])?;
+            writer.write_all(self.data())?;
         } else {
-            debug_assert!(hashes_count == self.hashes_depths.len());
-            for (hash, _depth) in &self.hashes_depths {
-                writer.write_all(hash.as_slice())?;
+            let bitlen = self.bit_length();
+            writer.write_all(&(bitlen as u16).to_le_bytes())?;
+            writer.write_all(&self.data()[0..bitlen / 8 + (bitlen % 8 != 0) as usize])?;
+            if bitlen % 8 == 0 {
+                writer.write_all(&[0])?;// for compatibility
             }
+            writer.write_all(&[self.level_mask().0])?;
+            writer.write_all(&[self.store_hashes() as u8])?;
+            let hashes_count = hashes_count(self.buf.unbounded_data());
+            writer.write_all(&[1])?;
+            writer.write_all(&[hashes_count as u8])?;
+            if self.store_hashes() {
+                for i in 0..hashes_count {
+                    let hash = hash(self.buf.unbounded_data(), i);
+                    writer.write_all(hash)?;
+                }
+            } else {
+                debug_assert!(hashes_count == self.hashes_depths.len());
+                for (hash, _depth) in &self.hashes_depths {
+                    writer.write_all(hash.as_slice())?;
+                }
+            }
+            writer.write_all(&[1])?;
+            writer.write_all(&[hashes_count as u8])?;
+            if self.store_hashes() {
+                for i in 0..hashes_count {
+                    let depth = depth(self.buf.unbounded_data(), i);
+                    writer.write_all(&depth.to_le_bytes())?;
+                }
+            } else {
+                for (_hash, depth) in &self.hashes_depths {
+                    writer.write_all(&depth.to_le_bytes())?;
+                }
+            }
+            writer.write_all(&[self.references_count() as u8])?;
         }
-        writer.write_all(&[1])?;
-        writer.write_all(&[hashes_count as u8])?;
-        if self.store_hashes() {
-            for i in 0..hashes_count {
-                let depth = depth(self.buf.unbounded_data(), i);
-                writer.write_all(&depth.to_le_bytes())?;
-            }
-        } else {
-            for (_hash, depth) in &self.hashes_depths {
-                writer.write_all(&depth.to_le_bytes())?;
-            }
-        }
-        writer.write_all(&[self.references_count() as u8])?;
         Ok(())
     }
 
@@ -1291,30 +1296,39 @@ impl CellData {
     pub fn deserialize<T: Read>(reader: &mut T) -> Result<Self> {
         let cell_type: CellType = FromPrimitive::from_u8(reader.read_byte()?)
             .ok_or_else(|| std::io::Error::from(ErrorKind::InvalidData))?;
-        let bitlen = reader.read_le_u16()? as usize;
-        let data_len = bitlen / 8 + (bitlen % 8 != 0) as usize;
-        let data = if bitlen % 8 == 0 {
-            let mut data = vec![0; data_len + 1];
-            reader.read_exact(&mut data[..data_len])?;
-            let _ = reader.read_byte()?; // for compatibility
-            data[data_len] = 0x80;
-            data
-        } else {
-            let mut data = vec![0; data_len];
+        if cell_type == CellType::Big {
+            let mut data = vec![0; reader.read_le_uint(3)? as usize];
             reader.read_exact(&mut data)?;
-            data
-        };
-        let level_mask = reader.read_byte()?;
-        let store_hashes = Self::read_bool(reader)?;
+            let mut cd = Self::with_params(cell_type, &data, 0, 0, false, None, None)?;
+            let hash = sha256_digest(&data[..]);
+            cd.set_hash_depth(0, &hash, 0)?;
+            Ok(cd)
+        } else {
+            let bitlen = reader.read_le_u16()? as usize;
+            let data_len = bitlen / 8 + (bitlen % 8 != 0) as usize;
+            let data = if bitlen % 8 == 0 {
+                let mut data = vec![0; data_len + 1];
+                reader.read_exact(&mut data[..data_len])?;
+                let _ = reader.read_byte()?; // for compatibility
+                data[data_len] = 0x80;
+                data
+            } else {
+                let mut data = vec![0; data_len];
+                reader.read_exact(&mut data)?;
+                data
+            };
+            let level_mask = reader.read_byte()?;
+            let store_hashes = Self::read_bool(reader)?;
 
-        let hashes = Self::read_short_array_opt(reader,
-                                                |reader| Ok(UInt256::from(reader.read_u256()?)))?;
-        let depths = Self::read_short_array_opt(reader,
-                                                |reader| Ok(reader.read_le_u16()?))?;
+            let hashes = Self::read_short_array_opt(reader,
+                                                    |reader| Ok(UInt256::from(reader.read_u256()?)))?;
+            let depths = Self::read_short_array_opt(reader,
+                                                    |reader| Ok(reader.read_le_u16()?))?;
 
-        let refs = reader.read_byte()?;
+            let refs = reader.read_byte()?;
 
-        Self::with_params(cell_type, &data, level_mask, refs, store_hashes, hashes, depths)
+            Self::with_params(cell_type, &data, level_mask, refs, store_hashes, hashes, depths)
+        }
     }
 
     fn read_short_array_opt<R, T, F>(reader: &mut R, read_func: F) -> Result<Option<[T; 4]>>

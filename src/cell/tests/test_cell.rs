@@ -89,32 +89,40 @@ depths: 2
    hashes: 8d7e5e5b7b0533c2bc2e18991c561d2f2a0a30225af61bb42ff55cd2fec2d3cc
    depths: 0"#);
 
-    let cell = create_big_cell(&[0; 24]).unwrap();
+    let mut data = [0; 24];
+    data[0] = 1;
+    data[23] = 7;
+    let cell = create_big_cell(&data).unwrap();
     assert_eq!(
         format!("{}", cell),
-        "Big   bytes: 24   data: 000000000000000000000000000000000000000000000000");
+        "Big   bytes: 24   data: 010000000000000000000000000000000000000000000007");
     assert_eq!(
         format!("{:#}", cell),
-        "Big   bytes: 24   data: 000000000000000000000000000000000000000000000000
-hash: 9d908ecfb6b256def8b49a7c504e6c889c4b0e41fe6ce3e01863dd7b61a20aa0");
+        "Big   bytes: 24   data: 010000000000000000000000000000000000000000000007
+hash: bee6d912b344447b23d23aa2f4bd8d550da1be353e5ae62766a5bf64a4803113");
 
-    let cell = create_big_cell(&[0; 101]).unwrap();
+    let mut data = [0; 101];
+    data[0] = 9;
+    data[100] = 0x15;
+    let cell = create_big_cell(&data).unwrap();
     assert_eq!(
         format!("{}", cell),
         "Big   bytes: 101
-data: 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000");
+data: 0900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000015");
 
-    let cell = create_big_cell(&[0; 1024]).unwrap();
+    let mut data = [0; 1024];
+    data[0] = 0x76;
+    let cell = create_big_cell(&data).unwrap();
     assert_eq!(
         format!("{}", cell),
         "Big   bytes: 1024
-data: 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000...");
+data: 7600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000...");
 
 assert_eq!(
     format!("{:#}", cell),
     "Big   bytes: 1024
-data: 0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000...
-hash: 5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef");
+data: 7600000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000...
+hash: e002f2230f56f0d5219ef4baf2ee1d343c73cba7a9d9d9a57fc09a3db790991b");
 
 
     let slice = SliceData::new(vec![0x0, 0x1, 0x80]);
@@ -592,6 +600,53 @@ fn test_cell_data_serialization_5() {
 
     let deserialized = CellData::deserialize(&mut serialized.as_slice()).unwrap();
     assert_eq!(deserialized, initial_cell);
+}
+
+#[test]
+fn test_cell_data_serialization_big_cell() {
+
+    fn test(len: usize) -> Result<()> {
+        let mut data = vec![0; len];
+        thread_rng().try_fill(&mut data[..])?;
+
+        let mut initial_cell = CellData::with_params(
+            CellType::Big,
+            // data
+            &data,  // data
+            0, // level mask
+            0, // refs count
+            false, // store hashes
+            None,
+            None
+        )?;
+        let hash = sha256_digest(&data[..]);
+        initial_cell.set_hash_depth(0, &hash, 0)?;
+
+        let mut output_buf: Vec<u8> = Vec::new();
+        initial_cell.serialize(&mut output_buf)?;
+
+        let mut serialized = Vec::new();
+        serialized.write_all(&[CellType::Big as u8])?;
+        serialized.write_all(&data.len().to_le_bytes()[0..3])?;
+        serialized.write_all(&data)?;
+
+        assert_eq!(output_buf, serialized);
+
+        let deserialized = CellData::deserialize(&mut serialized.as_slice())?;
+        if deserialized != initial_cell {
+            fail!("deserialized != initial_cell");
+        }
+
+        Ok(())
+    }
+
+    test(0).unwrap();
+    test(100).unwrap();
+    test(1024).unwrap();
+    test(1024 * 1024).unwrap();
+    test(1024 * 1024 * 2).unwrap();
+    test(0xffffff).unwrap();
+
 }
 
 #[test]
