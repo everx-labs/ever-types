@@ -18,7 +18,7 @@ use crate::{
     Ed25519PrivateKey, sha256_digest_slices, x25519_shared_secret
 };
 use std::{convert::TryInto, fmt::{self, Debug, Display, Formatter}, sync::Arc};
-use super::bls::{BLS_PUBLIC_KEY_LEN, BLS_SECRET_KEY_LEN};
+use super::bls::{BLS_PUBLIC_KEY_LEN, BLS_SECRET_KEY_LEN, BLS_KEY_MATERIAL_LEN};
 
 pub trait KeyOption: Sync + Send + Debug {
     fn id(&self) -> &Arc<KeyId>;
@@ -233,6 +233,15 @@ impl BlsKeyOption {
         };
 
         Ok((json, Arc::new(key)))
+    }
+
+    pub fn from_key_material(ikm: &[u8; BLS_KEY_MATERIAL_LEN]) -> Result<Self> {
+        let (pub_key, pvt_key) = super::bls::gen_bls_key_pair_based_on_key_material(ikm)?;
+        Ok(Self {
+            id: Self::calc_id(&pub_key),
+            pub_key: pub_key,
+            pvt_key: Some(pvt_key)
+        })
     }
 
     pub fn from_private_key_json(json: &KeyOptionJson) -> Result<Arc<dyn KeyOption>> {

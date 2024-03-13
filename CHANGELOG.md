@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.34
+
+- Generate BLS key based on key material
+
 ## Version 2.0.33
 
 - Added new method `Cell::cell_impl(&self)`
