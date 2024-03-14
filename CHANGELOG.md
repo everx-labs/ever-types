@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.38
+
+- Minor optimization for fn SliceData::get_bytestring
+
 ## Version 2.0.37
 
 - Renamed `TON` into `ever` in comments
