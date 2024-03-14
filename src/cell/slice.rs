@@ -424,14 +424,10 @@ impl SliceData {
         } else if bits <= (8 - r) {
             Ok(self.storage()[q] >> (8 - r - bits) & ((1 << bits) - 1))
         } else {
-            let mut ret = 0u16;
+            // We shall have here at least two bytes to read
             let data = self.storage();
-            if q < data.len() {
-                ret |= (data[q] as u16) << 8;
-            }
-            if q < data.len() - 1 {
-                ret |= data[q + 1] as u16;
-            }
+            let mut ret = (data[q] as u16) << 8;
+            ret |= data[q + 1] as u16;
             Ok((ret >> (8 - r)) as u8 >> (8 - bits))
         }
     }
@@ -586,15 +582,32 @@ impl SliceData {
         Ok(())
     }
 
-    pub fn get_bytestring(&self, mut offset: usize) -> Vec<u8> {
-        let mut ret = Vec::new();
-        while (self.data_window.start + offset + 8) <= self.data_window.end {
-            ret.push(self.get_byte(offset).unwrap());
-            offset += 8
+    pub fn get_bytestring(&self, offset: usize) -> Vec<u8> {
+        let mut head = self.data_window.start + offset;
+        if self.data_window.end <= head {
+            return vec![];
         }
-        if (self.data_window.start + offset) < self.data_window.end {
-            let remainder = self.data_window.end - self.data_window.start - offset;
-            ret.push(self.get_bits(offset, remainder).unwrap() << (8 - remainder));
+        let data = self.storage();
+        let r_rev = 8 - head % 8;
+        let mut ret = if r_rev == 8 {
+            let range = (head / 8) .. (self.data_window.end / 8);
+            head = self.data_window.end / 8 * 8;
+            Vec::from(&data[range])
+        } else {
+            let mut ret = Vec::with_capacity((self.data_window.end - head + 7) / 8);
+            let mut r = data[head / 8] as u16;
+            while head + 8 <= self.data_window.end {
+                head += 8;
+                r = (r << 8) | (data[head / 8] as u16);
+                ret.push((r >> r_rev) as u8);
+            }
+            ret
+        };
+        if head < self.data_window.end {
+            let remainder = self.data_window.end - head;
+            ret.push(
+                self.get_bits(head - self.data_window.start, remainder).unwrap() << (8 - remainder)
+            );
         }
         ret
     }
