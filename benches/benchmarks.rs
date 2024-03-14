@@ -1,6 +1,7 @@
 use criterion::{black_box, criterion_main, criterion_group, Criterion};
 use pprof::criterion::{PProfProfiler, Output};
-use ton_types::{BuilderData, Cell, GasConsumer, HashmapE, Result, SliceData, Status, error, fail, read_single_root_boc};
+extern crate ton_types as ever_types;
+use ever_types::{BuilderData, Cell, GasConsumer, HashmapE, Result, SliceData, Status, error, fail, read_single_root_boc};
 
 fn read_boc(filename: &str) -> Vec<u8> {
     let mut bytes = Vec::new();
@@ -12,17 +13,17 @@ fn read_boc(filename: &str) -> Vec<u8> {
 fn bench_boc_read(c: &mut Criterion) {
     let bytes = read_boc("src/tests/data/medium.boc");
     c.bench_function("boc-read", |b| b.iter( || {
-        black_box(ton_types::read_single_root_boc(bytes.clone()).unwrap());
+        black_box(ever_types::read_single_root_boc(bytes.clone()).unwrap());
     }));
 }
 
 fn bench_boc_write(c: &mut Criterion) {
     let bytes = read_boc("src/tests/data/medium.boc");
-    let cell = ton_types::read_single_root_boc(bytes).unwrap();
+    let cell = ever_types::read_single_root_boc(bytes).unwrap();
     let mut g = c.benchmark_group("bench");
     g.measurement_time(std::time::Duration::new(15, 0));
     g.bench_function("boc-write", |b| b.iter( || {
-        black_box(ton_types::write_boc(&cell).unwrap());
+        black_box(ever_types::write_boc(&cell).unwrap());
     }));
 }
 

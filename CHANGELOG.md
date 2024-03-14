@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.37
+
+- Renamed `TON` into `ever` in comments
+
 ## Version 2.0.36
 
 - Added `BocReader::set_allow_big_cells` method
