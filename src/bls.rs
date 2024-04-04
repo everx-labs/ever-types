@@ -12,7 +12,6 @@
 */
 
 use crate::{fail, Result};
-use std::time::Instant;
 use blst::min_pk::*;
 use blst::*;
 use rand::Rng;
@@ -122,11 +121,8 @@ pub fn aggregate_public_keys_based_on_nodes_info(
             apk_pks_required_refs.push(bls_pks_bytes[*index as usize]);
         }
     }
-    let now = Instant::now();
     let result = aggregate_public_keys(&apk_pks_required_refs)?;
-    let duration = now.elapsed();
 
-    println!("Time elapsed by !!!aggregate_public_keys is: {:?}", duration);
     Ok(result)
 }
 
@@ -170,7 +166,6 @@ pub fn aggregate_bls_signatures(sig_bytes_with_nodes_info_vec: &[&[u8]]) -> Resu
     for i in 0..bls_sigs_refs.len() {
         nodes_info_refs.push(&bls_sigs_refs[i].nodes_info);
         let sig = convert_signature_bytes_to_signature(&bls_sigs_refs[i].sig_bytes)?;
-        println!("{:?}", &sig.to_bytes());
         //return this part to exclude zero sig
        /* let res = sig.validate(true);
         if res.is_err() {
