@@ -16,6 +16,7 @@ use std::hash::Hash;
 use std::hash::Hasher;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
+use std::time::Instant;
 
 #[test]
 fn test_gen_bls_key_pair() {
