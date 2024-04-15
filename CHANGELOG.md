@@ -2,6 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
+## Version 2.0.40
+
+- Added wrappers for BLS arithmetic
+
 ## Version 2.0.39
 
 - Remove debug prints for BLS
