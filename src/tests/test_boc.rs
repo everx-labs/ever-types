@@ -361,15 +361,15 @@ fn test_number_of_bytes_to_fit() {
 #[test]
 fn test_crc_pure() {
     // Some part of crc module's test from real ton sorces
-    assert_eq!(crc32_digest(&[0;32]), 0x8a9136aa);
-    assert_eq!(crc32_digest(&[0xff;32]), 0x62a8ab43);
+    assert_eq!(crc32_digest([0;32]), 0x8a9136aa);
+    assert_eq!(crc32_digest([0xff;32]), 0x62a8ab43);
     let data = [
         0x01, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00,
         0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x18, 0x28, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     ];
-    assert_eq!(crc32_digest(&data), 0xd9963a56);
+    assert_eq!(crc32_digest(data), 0xd9963a56);
 
     let mut digest = Crc32::new();
     digest.update(&data[..10]);
@@ -800,7 +800,7 @@ fn test_bad_boc_11() {
 fn test_bad_boc_12() {
     let data = base64_decode("tv+acwEBBwEAgQJAAA3S0tLSjwAAAAAAAADS///DyG0BXNKPAAAAAAAAANL//8PIbQFcBQCrSP///wAAAAAAAAAAAAAAAQAAAAAAAAAAAAD/kwAAAAAA0tLS0gUAq0j///8AAAAAAAAAAAAAAAEAAAAAAAAAAAAA/5MAAAAAANLS0tLS0tLS0tLS0tIAAQ==").unwrap();
     let d1 = std::time::Instant::now();
-    let _read_result = read_boc(&data);
+    let _read_result = read_boc(data);
     let elapsed = d1.elapsed().as_nanos();
     println!("Parse: {}nanos,", elapsed);
     assert!(elapsed < 1_000_000);

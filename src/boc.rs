@@ -206,7 +206,7 @@ impl BocWriterStack {
 
         dest.write_all(&[offset_size as u8])?; // off_bytes:(## 8) { off_bytes <= 8 }
         dest.write_all(&(cells_count as u64).to_be_bytes()[(8-ref_size)..8])?;
-        dest.write_all(&(1 as u64).to_be_bytes()[(8-ref_size)..8])?;
+        dest.write_all(&(1_u64).to_be_bytes()[(8-ref_size)..8])?;
         dest.write_all(&0_u64.to_be_bytes()[(8-ref_size)..8])?;
         dest.write_all(&(total_cells_size as u64).to_be_bytes()[(8-offset_size)..8])?;
 
@@ -229,14 +229,14 @@ impl BocWriterStack {
             //let ref_count = u32::from_be_bytes(slice.try_into().unwrap());
             let ref_count = cell::refs_count(&cell_buffer);
             
-            let data_size = cell_size as usize - ref_count as usize * TEMP_REF_SIZE;
+            let data_size = cell_size as usize - ref_count * TEMP_REF_SIZE;
             let ref_offset = data_size;
 
-            let raw_data_slice = &cell_buffer[..data_size as usize];
+            let raw_data_slice = &cell_buffer[..data_size];
             dest.write_all(raw_data_slice)?;
 
             for r in 0..ref_count {
-                let ref_offset = ref_offset + r as usize * TEMP_REF_SIZE;
+                let ref_offset = ref_offset + r * TEMP_REF_SIZE;
                 let slice = &mut cell_buffer[ref_offset..ref_offset + TEMP_REF_SIZE];
                 let index = u32::from_be_bytes(slice.try_into().unwrap());
                 let child_index = cells_count as u64 - index as u64 - 1;
@@ -333,7 +333,7 @@ impl BocWriterStack {
                     stack.push((
                         index,
                         StackItem::Loaded(LoadedCell{
-                            cell: cell,
+                            cell,
                             references:reference_indices,
                         }),
                     ));

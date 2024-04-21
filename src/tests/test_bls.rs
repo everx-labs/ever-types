@@ -16,6 +16,8 @@ use std::hash::Hash;
 use std::hash::Hasher;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
+use std::time::Instant;
+use std::vec;
 
 #[test]
 fn test_gen_bls_key_pair() {
@@ -83,7 +85,7 @@ fn test_verify() {
         //  println!("Public key : {:?}", key_pair.0);
         //println!("Secret key : {:?}", key_pair.1);
         println!("Time elapsed by verify is: {:?}", duration);
-         assert_eq!(res, true);
+         assert!(res);
     }
 }
 
@@ -129,7 +131,7 @@ fn test_aggregate_public_keys() {
             let key_pair = gen_bls_key_pair().unwrap();
             public_keys.push(key_pair.0);
         }
-        let public_keys_refs: Vec<&[u8; BLS_PUBLIC_KEY_LEN]> = public_keys.iter().map(|pk| pk).collect();
+        let public_keys_refs: Vec<&[u8; BLS_PUBLIC_KEY_LEN]> = public_keys.iter().collect();
         let now = Instant::now();
         let _res = aggregate_public_keys(&public_keys_refs).unwrap();
         let duration = now.elapsed();
@@ -137,6 +139,59 @@ fn test_aggregate_public_keys() {
         //println!("Secret key : {:?}", key_pair.1);
         println!("Time elapsed by aggregate_public_keys is: {:?}", duration);
     }
+}
+
+#[test]
+fn test_aggregate_public_keys_and_verify() {
+    let number_of_keys = 10;
+    let msg = generate_random_msg_of_fixed_len(1000);
+
+    let mut public_keys = Vec::new();
+    let mut sigs = Vec::new();
+    for _j in 0..number_of_keys {
+        let (pub_ley, sig_key) = gen_bls_key_pair().unwrap();
+        sigs.push(sign(&sig_key, &msg).unwrap());
+        public_keys.push(pub_ley);
+    }
+
+    let sigs_refs: Vec<&[u8; BLS_SIG_LEN]> = 
+        sigs.iter().map(|sig| sig.as_slice().try_into().unwrap()).collect();
+    let sig_bytes = aggregate_pure_bls_signatures(&sigs_refs).unwrap();
+
+    let keys_refs: Vec<&[u8; BLS_PUBLIC_KEY_LEN]> = public_keys.iter().collect();
+    assert!(aggregate_public_keys_and_verify(
+        &sig_bytes,
+        &msg,
+        &keys_refs
+    ).unwrap());
+}
+
+#[test]
+fn test_aggregate_and_verify() {
+    let number_of_keys = 10;
+    let mut msgs = vec![];
+
+    let mut public_keys = Vec::new();
+    let mut sigs = Vec::new();
+    for _j in 0..number_of_keys {
+        let (pub_ley, sig_key) = gen_bls_key_pair().unwrap();
+        let msg = generate_random_msg_of_fixed_len(1000);
+        sigs.push(sign(&sig_key, &msg).unwrap());
+        msgs.push(msg);
+        public_keys.push(pub_ley);
+    }
+
+    let sigs_refs: Vec<&[u8; BLS_SIG_LEN]> = 
+        sigs.iter().map(|sig| sig.as_slice().try_into().unwrap()).collect();
+    let sig_bytes = aggregate_pure_bls_signatures(&sigs_refs).unwrap();
+
+    let keys_refs: Vec<&[u8; BLS_PUBLIC_KEY_LEN]> = public_keys.iter().collect();
+    let msgs_refs: Vec<&[u8]> = msgs.iter().map(|msg| msg.as_slice()).collect();
+    assert!(aggregate_and_verify(
+        &sig_bytes,
+        &msgs_refs,
+        &keys_refs
+    ).unwrap());
 }
 
 #[test]
@@ -151,7 +206,7 @@ fn test_aggregate_public_keys_based_on_nodes_info() {
             node_info_vec.push(nodes_info)
 
         }
-        let node_info_vec_refs: Vec<&NodesInfo> = node_info_vec.iter().map(|info| info).collect();
+        let node_info_vec_refs: Vec<&NodesInfo> = node_info_vec.iter().collect();
         let info = NodesInfo::merge_multiple(&node_info_vec_refs).unwrap();
         println!("Node info size = {}", info.map.len());
        // info.print();
@@ -161,7 +216,7 @@ fn test_aggregate_public_keys_based_on_nodes_info() {
             let key_pair = gen_bls_key_pair().unwrap();
             public_keys.push(key_pair.0);
         }
-        let public_keys_refs: Vec<&[u8; BLS_PUBLIC_KEY_LEN]> = public_keys.iter().map(|pk| pk).collect();
+        let public_keys_refs: Vec<&[u8; BLS_PUBLIC_KEY_LEN]> = public_keys.iter().collect();
         let now = Instant::now();
         let _res = aggregate_public_keys_based_on_nodes_info(&public_keys_refs, &info.serialize()).unwrap();
         let duration = now.elapsed();
@@ -272,18 +327,16 @@ mod tests_aggregate {
         // all other bits will be zero
         let a2 = [0; BLS_PUBLIC_KEY_LEN - 1];
 
-        let key_2: Vec<u8> = a1.iter().chain(a2.iter()).map(|v| *v).collect();
+        let key_2: Vec<u8> = a1.iter().chain(a2.iter()).copied().collect();
         let key_2: [u8; BLS_PUBLIC_KEY_LEN] = key_2.try_into().unwrap();
         println!("{:?}", key_2);
         //key_2 now is really zero public key for blst lib, it will not throw bad encoding error and we can work with it
         //but to exclude zero split attack cases we setup additional verification everywhere to exclude zero public key
 
-        let  mut keys = Vec::new();
-        keys.push(&key_2);
-         keys.push(&key_1);
+        let keys = vec![&key_2, &key_1];
 
          let err = aggregate_public_keys(&keys).err();
-         println!("{}",err.unwrap().to_string());
+         println!("{}",err.unwrap());
         //assert!(err.is_some());
     }
 
@@ -295,12 +348,12 @@ mod tests_aggregate {
         let a1 = [0xC0]; //11000000, here first two bits shows that public key is in compressed form and it's gonna be a point of infinity (zero vector)
         // all other bits will be zero
         let a2 = [0; BLS_PUBLIC_KEY_LEN - 1];
-        let key_2: Vec<u8> = a1.iter().chain(a2.iter()).map(|v| *v).collect();
+        let key_2: Vec<u8> = a1.iter().chain(a2.iter()).copied().collect();
         let key_2: [u8; BLS_PUBLIC_KEY_LEN] = key_2.try_into().unwrap();
         println!("{:?}", key_2);
         //key_2 now is really zero public key for blst lib, it will not throw bad encoding error and we can work with it
         //but to exclude zero split attack cases we setup additional verification everywhere to exclude zero public key
-        let pkk =  PublicKey::from_bytes(&key_2).unwrap();
+        let pkk =  blst::min_pk::PublicKey::from_bytes(&key_2).unwrap();
         //let pkk = //convert_public_key_bytes_to_public_key(&key_2).unwrap();
         let err = pkk.validate().err();
         println!("ERROR {:?}", err);
@@ -311,10 +364,10 @@ mod tests_aggregate {
         let a1 = [0x40]; //01000000, here first two bits shows that public key is in compressed form and it's gonna be a point of infinity (zero vector)
         // all other bits will be zero
         let a2 = [0; 2*BLS_PUBLIC_KEY_LEN - 1];
-        let key_2: Vec<u8> = a1.iter().chain(a2.iter()).map(|v| *v).collect();
+        let key_2: Vec<u8> = a1.iter().chain(a2.iter()).copied().collect();
         let key_2: [u8; 2*BLS_PUBLIC_KEY_LEN] = key_2.try_into().unwrap();
         println!("{:?}", key_2);
-        let pkk =  PublicKey::from_bytes(&key_2).unwrap();
+        let pkk =  blst::min_pk::PublicKey::from_bytes(&key_2).unwrap();
         let err = pkk.validate().err();
         println!("ERROR {:?}", err);
     }
@@ -325,11 +378,9 @@ mod tests_aggregate {
         let kp_1 = BlsKeyPair::gen_bls_key_pair().unwrap();
         let key_1: [u8; BLS_PUBLIC_KEY_LEN] = kp_1.pk_bytes;
         let key_2 = [130, 70, 150, 125, 169, 172, 192, 188, 9, 54, 153, 180, 207, 211, 148, 25, 5, 82, 202, 176, 6, 166, 177, 79, 220, 204, 168, 36, 162, 159, 172, 63, 141, 16, 248, 139, 97, 73, 38, 154, 188, 186, 72, 188, 75, 27, 199, 44];
-        let  mut keys = Vec::new();
-        keys.push(&key_1);
-        keys.push(&key_2);
+        let keys = vec![&key_2, &key_1];
         let err = aggregate_public_keys(&keys).err();
-        println!("{}",err.unwrap().to_string());
+        println!("{}",err.unwrap());
         //assert!(err.is_some());
     }
 
@@ -339,11 +390,11 @@ mod tests_aggregate {
         // all other bits will be zero
         let a2 = [0; BLS_SIG_LEN - 1];
 
-        let sig_2: Vec<u8> = a1.iter().chain(a2.iter()).map(|v| *v).collect();
+        let sig_2: Vec<u8> = a1.iter().chain(a2.iter()).copied().collect();
         let sig_2: [u8; BLS_SIG_LEN] = sig_2.try_into().unwrap();
         println!("{:?}", sig_2);
 
-        let ss = Signature::from_bytes(&sig_2).unwrap();
+        let ss = blst::min_pk::Signature::from_bytes(&sig_2).unwrap();
         let err = ss.validate(true).err();
         println!("ERROR {:?}", err);/**/
         //assert!(err.is_some());
@@ -355,11 +406,11 @@ mod tests_aggregate {
         // all other bits will be zero
         let a2 = [0; 2*BLS_SIG_LEN - 1];
 
-        let sig_2: Vec<u8> = a1.iter().chain(a2.iter()).map(|v| *v).collect();
+        let sig_2: Vec<u8> = a1.iter().chain(a2.iter()).copied().collect();
         let sig_2: [u8; 2*BLS_SIG_LEN] = sig_2.try_into().unwrap();
         println!("{:?}", sig_2);
 
-        let ss = Signature::from_bytes(&sig_2).unwrap();
+        let ss = blst::min_pk::Signature::from_bytes(&sig_2).unwrap();
         let err = ss.validate(true).err();
         println!("ERROR {:?}", err);/**/
         //assert!(err.is_some());
@@ -377,7 +428,7 @@ mod tests_aggregate {
         let sig_2: [u8; BLS_SIG_LEN] = [145, 159, 130, 216, 123, 12, 196, 4, 178, 40, 10, 4, 206, 211, 143, 207, 233, 217, 193, 27, 251, 138, 210, 17, 189, 65, 10, 145, 47, 247, 82, 94, 15, 139, 219, 83, 9, 60, 251, 70, 121, 176, 26, 94, 188, 188, 243, 225, 17, 176, 133, 133, 150, 81, 226, 69, 136, 52, 209, 39, 19, 18, 110, 53, 61, 144, 227, 207, 190, 158, 54, 169, 113, 34, 57, 161, 90, 110, 33, 46, 164, 236, 52, 251, 142, 236, 246, 173, 1, 183, 66, 238, 48, 140, 170, 141];
         let agg_sig_2_bytes = BlsSignature::add_node_info_to_sig(sig_2, ind_2, total).unwrap();
         let err = aggregate_two_bls_signatures(&agg_sig_2_bytes, &agg_sig_1_bytes).err();
-        println!("{}",err.unwrap().to_string());
+        println!("{}",err.unwrap());
     }
 
     #[test]
@@ -391,11 +442,12 @@ mod tests_aggregate {
         let agg_sig_1_bytes = BlsSignature::sign(&kp_1.sk_bytes, &msg, ind_1, total).unwrap();
         let sig_2: [u8; BLS_SIG_LEN] = [145, 159, 130, 216, 123, 12, 196, 4, 178, 40, 10, 4, 206, 211, 143, 207, 233, 217, 193, 27, 251, 138, 210, 17, 189, 65, 10, 145, 47, 247, 82, 94, 15, 139, 219, 83, 9, 60, 251, 70, 121, 176, 26, 94, 188, 188, 243, 225, 17, 176, 133, 133, 150, 81, 226, 69, 136, 52, 209, 39, 19, 18, 110, 53, 61, 144, 227, 207, 190, 158, 54, 169, 113, 34, 57, 161, 90, 110, 33, 46, 164, 236, 52, 251, 142, 236, 246, 173, 1, 183, 66, 238, 48, 140, 170, 141];
         let agg_sig_2_bytes = BlsSignature::add_node_info_to_sig(sig_2, ind_2, total).unwrap();
-        let mut sigs = Vec::new();
-        sigs.push(&agg_sig_2_bytes[..]);
-        sigs.push(&agg_sig_1_bytes[..]);
+        let sigs = vec![
+            &agg_sig_2_bytes[..],
+            &agg_sig_1_bytes[..]
+        ];
         let err = aggregate_bls_signatures(&sigs).err();
-        println!("{}",err.unwrap().to_string());
+        println!("{}",err.unwrap());
     }
 
 
@@ -429,7 +481,7 @@ mod tests_aggregate {
         bls_pk_vec.push(&key_1);
         bls_pk_vec.push(&key_2);
         let err = aggregate_public_keys(&bls_pk_vec).err();
-         println!("{}",err.unwrap().to_string());
+         println!("{}",err.unwrap());
         //assert!(err.is_some());
     }
 
@@ -486,7 +538,7 @@ mod tests_aggregate {
         bls_pk_vec.push(&key_1);
         let node_info = vec![0, 100, 0, 100, 0, 99];
         let err = aggregate_public_keys_based_on_nodes_info(&bls_pk_vec, &node_info).err();
-        println!("{}",err.unwrap().to_string());
+        println!("{}",err.unwrap());
         //assert!(err.is_some());
     }
 
@@ -510,7 +562,7 @@ mod tests_aggregate {
         bls_pk_vec.push(&key_2);
         let node_info = vec![0, 1, 0, 0, 0, 99];
         let err = aggregate_public_keys_based_on_nodes_info(&bls_pk_vec, &node_info).err();
-        println!("{}",err.unwrap().to_string());
+        println!("{}",err.unwrap());
         //assert!(err.is_some());
     }
 
@@ -728,8 +780,7 @@ mod tests_aggregate {
     #[test]
     fn test_aggregate_bls_signatures_fail_one_sig_not_enough() {
         let bls_sig_bytes = create_bls_sig();
-        let mut vec= Vec::new();
-        vec.push(&bls_sig_bytes[..]);
+        let vec = vec![&bls_sig_bytes[..]];
         let err = aggregate_bls_signatures(&vec).err();
         assert!(err.is_some());
         //println!("{}",err.unwrap().to_string());
@@ -757,14 +808,14 @@ mod tests_aggregate {
 
         assert_eq!(agg_sig_1.nodes_info.total_num_of_nodes, total);
         assert_eq!(agg_sig_1.nodes_info.map.len(), 1);
-        assert_eq!(agg_sig_1.nodes_info.map.contains_key(&ind_1), true);
+        assert!(agg_sig_1.nodes_info.map.contains_key(&ind_1));
         match agg_sig_1.nodes_info.map.get(&ind_1) {
             Some(number_of_occurrence) => assert_eq!(*number_of_occurrence, 1),
             None => panic!("Node index not found"),
         }
         assert_eq!(agg_sig_2.nodes_info.total_num_of_nodes, total);
         assert_eq!(agg_sig_2.nodes_info.map.len(), 1);
-        assert_eq!(agg_sig_2.nodes_info.map.contains_key(&ind_2), true);
+        assert!(agg_sig_2.nodes_info.map.contains_key(&ind_2));
         match agg_sig_2.nodes_info.map.get(&ind_2) {
             Some(number_of_occurrence) => assert_eq!(*number_of_occurrence, 1),
             None => panic!("Node index not found"),
@@ -774,15 +825,16 @@ mod tests_aggregate {
         let agg_sig_1_2 = BlsSignature::deserialize(&agg_sig_1_2_bytes).unwrap();
         agg_sig_1_2.print();
 
-        let mut apks = Vec::new();
-        apks.push(&kp_1.pk_bytes);
-        apks.push(&kp_2.pk_bytes);
+        let apks = vec![
+            &kp_1.pk_bytes,
+            &kp_2.pk_bytes
+        ];
 
         let apk_1_2 = aggregate_public_keys(&apks).unwrap();
 
         let res = BlsSignature::verify(&agg_sig_1_2_bytes, &apk_1_2, &msg).unwrap();
         println!("res = {}", res);
-        assert_eq!(res, true);
+        assert!(res);
     }
 
     #[test]
@@ -822,7 +874,7 @@ mod tests_aggregate {
         }
 
         let bls_sig_from_nodes_refs: Vec<&[u8]> = bls_sig_from_nodes.iter().map(|sig| &sig[..]).collect();
-        let pk_from_nodes_refs: Vec<&[u8; BLS_PUBLIC_KEY_LEN]> = pk_from_nodes.iter().map(|pk| pk).collect();
+        let pk_from_nodes_refs: Vec<&[u8; BLS_PUBLIC_KEY_LEN]> = pk_from_nodes.iter().collect();
 
         let res_sig = aggregate_bls_signatures(&bls_sig_from_nodes_refs).unwrap();
 
@@ -859,7 +911,7 @@ mod tests_aggregate {
         let res = BlsSignature::verify(&res_sig, &res_pk, &msg).unwrap();
 
         println!("res = {}", res);
-        assert_eq!(res, true);
+        assert!(res);
     }
 
 }
@@ -880,7 +932,7 @@ mod tests_key_gen {
         let key_pair_data = key_pair.serialize();
         let key_pair_new = BlsKeyPair::deserialize(&key_pair_data).unwrap();
         let res = key_pair == key_pair_new;
-        assert_eq!(res, true);
+        assert!(res);
     }
 
     #[test]
@@ -889,7 +941,7 @@ mod tests_key_gen {
         let key_pair_data = key_pair.serialize();
         let key_pair_new = BlsKeyPair::deserialize_based_on_secret_key(&key_pair_data.1).unwrap();
         let res = key_pair == key_pair_new;
-        assert_eq!(res, true);
+        assert!(res);
     }
 
     #[test]
@@ -935,17 +987,17 @@ mod sig_tests {
         // all other bits will be zero
         let a2 = [0; BLS_PUBLIC_KEY_LEN - 1];
 
-        let key_2: Vec<u8> = a1.iter().chain(a2.iter()).map(|v| *v).collect();
+        let key_2: Vec<u8> = a1.iter().chain(a2.iter()).copied().collect();
         let key_2: [u8; BLS_PUBLIC_KEY_LEN] = key_2.try_into().unwrap();
         println!("{:?}", key_2);
 
         let res = BlsSignature::verify(&bls_sig_bytes,  &key_2, &msg).unwrap();
         println!("res = {}", res);
-        assert_eq!(res, false);
+        assert!(!res);
 
         let key_3 = [130, 70, 150, 125, 169, 172, 192, 188, 9, 54, 153, 180, 207, 211, 148, 25, 5, 82, 202, 176, 6, 166, 177, 79, 220, 204, 168, 36, 162, 159, 172, 63, 141, 16, 248, 139, 97, 73, 38, 154, 188, 186, 72, 188, 75, 27, 199, 44];
         let err = BlsSignature::verify(&bls_sig_bytes,  &key_3, &msg).err();
-        println!("{}",err.unwrap().to_string());
+        println!("{}",err.unwrap());
         //assert!(err.is_some());
     }
 
@@ -1078,7 +1130,7 @@ mod sig_tests {
         println!("{:?}", sig);
         let res = BlsSignature::simple_verify(&sig, &msg, &kp.pk_bytes).unwrap();
         println!("res = {}", res);
-        assert_eq!(res, true);
+        assert!(res);
     }
 
     #[test]
@@ -1093,7 +1145,7 @@ mod sig_tests {
         println!("{:?}", sig);
         let res = BlsSignature::simple_verify(&sig, &msg, &kp_2.pk_bytes).unwrap();
         println!("res = {}", res);
-        assert_eq!(res, false);
+        assert!(!res);
     }
 
     /** add_node_info_to_sig **/
@@ -1396,7 +1448,7 @@ mod sig_tests {
         let bls_sig_bytes = BlsSignature::sign(&kp.sk_bytes, &msg, node_index, total_num_of_nodes).unwrap();
         let res = BlsSignature::verify(&bls_sig_bytes,  &kp.pk_bytes, &msg).unwrap();
         println!("res = {}", res);
-        assert_eq!(res, true);
+        assert!(res);
     }
 
     #[test]
@@ -1411,7 +1463,7 @@ mod sig_tests {
         let bls_sig_bytes = BlsSignature::sign(&kp_1.sk_bytes, &msg, node_index, total_num_of_nodes).unwrap();
         let res = BlsSignature::verify(&bls_sig_bytes,  &kp_2.pk_bytes, &msg).unwrap();
         println!("res = {}", res);
-        assert_eq!(res, false);
+        assert!(!res);
     }
 
     /** additional test for intersection **/
@@ -1426,12 +1478,13 @@ mod sig_tests {
         println!("PK2 = {:?}", &kp2.pk.to_bytes());
         println!("PK3 = {:?}", &kp3.pk.to_bytes());
 
-        let mut pks_refs: Vec<&PublicKey> = Vec::new();
-        pks_refs.push(&kp1.pk);
-        pks_refs.push(&kp2.pk);
-        pks_refs.push(&kp3.pk);
+        let pks_refs: Vec<&blst::min_pk::PublicKey> = vec![
+            &kp1.pk,
+            &kp2.pk,
+            &kp3.pk,
+        ];
 
-        let agg_pk = match AggregatePublicKey::aggregate(&pks_refs, false) {
+        let agg_pk = match blst::min_pk::AggregatePublicKey::aggregate(&pks_refs, false) {
             Ok(agg_pk) => agg_pk,
             Err(err) => panic!("aggregate failure: {:?}", err),
         };
@@ -1442,41 +1495,43 @@ mod sig_tests {
 
         let msg = generate_random_msg();
 
-        let mut sigs_from_nodes_part1: Vec<Signature> = Vec::new();
-        sigs_from_nodes_part1.push(kp1.sk.sign(&msg, &DST, &[]));
-        sigs_from_nodes_part1.push(kp2.sk.sign(&msg, &DST, &[]));
+        let sigs_from_nodes_part1: Vec<blst::min_pk::Signature> = vec![
+            kp1.sk.sign(&msg, &DST, &[]),
+            kp2.sk.sign(&msg, &DST, &[]),
+        ];
         println!("sig len = {}", sigs_from_nodes_part1[0].to_bytes().len());
         println!("sig len = {}", sigs_from_nodes_part1[1].to_bytes().len());
 
-        let mut sig_refs1: Vec<&Signature> = Vec::new();
+        let mut sig_refs1: Vec<&blst::min_pk::Signature> = Vec::new();
         for sig in &sigs_from_nodes_part1 {
-            sig_refs1.push(&sig);
+            sig_refs1.push(sig);
         }
 
-        let mut agg_temp1 = AggregateSignature::from_signature(&sig_refs1[0]);
-        AggregateSignature::add_signature(&mut agg_temp1, &sig_refs1[1], false).unwrap();
+        let mut agg_temp1 = blst::min_pk::AggregateSignature::from_signature(sig_refs1[0]);
+        blst::min_pk::AggregateSignature::add_signature(&mut agg_temp1, sig_refs1[1], false).unwrap();
 
         let sigg1 = agg_temp1.to_signature();
 
-        let mut sigs_from_nodes_part2: Vec<Signature> = Vec::new();
-        sigs_from_nodes_part2.push(kp3.sk.sign(&msg, &DST, &[]));
-        sigs_from_nodes_part2.push(kp1.sk.sign(&msg, &DST, &[]));
+        let sigs_from_nodes_part2: Vec<blst::min_pk::Signature> = vec![
+            kp3.sk.sign(&msg, &DST, &[]),
+            kp1.sk.sign(&msg, &DST, &[])
+        ];
 
         println!("sig len = {}", sigs_from_nodes_part2[0].to_bytes().len());
         println!("sig len = {}", sigs_from_nodes_part2[1].to_bytes().len());
 
-        let mut sig_refs2: Vec<&Signature> = Vec::new();
+        let mut sig_refs2: Vec<&blst::min_pk::Signature> = Vec::new();
         for sig in &sigs_from_nodes_part2 {
-            sig_refs2.push(&sig);
+            sig_refs2.push(sig);
         }
 
-        let mut agg_temp2 = AggregateSignature::from_signature(&sig_refs2[0]);
-        AggregateSignature::add_signature(&mut agg_temp2, &sig_refs2[1], false).unwrap();
+        let mut agg_temp2 = blst::min_pk::AggregateSignature::from_signature(sig_refs2[0]);
+        blst::min_pk::AggregateSignature::add_signature(&mut agg_temp2, sig_refs2[1], false).unwrap();
 
         let sigg2 = agg_temp2.to_signature();
 
-        let mut agg_temp_last = AggregateSignature::from_signature(&sigg1);
-        AggregateSignature::add_signature(&mut agg_temp_last, &sigg2, false).unwrap();
+        let mut agg_temp_last = blst::min_pk::AggregateSignature::from_signature(&sigg1);
+        blst::min_pk::AggregateSignature::add_signature(&mut agg_temp_last, &sigg2, false).unwrap();
 
         let agg_final = agg_temp_last.to_signature();
         println!("@@sig len = {}", agg_final.to_bytes().len());
@@ -1486,7 +1541,7 @@ mod sig_tests {
 
         println!("res = {}", res);
 
-        assert_eq!(res, false);
+        assert!(!res);
     }
 
     #[test]
@@ -1499,31 +1554,27 @@ mod sig_tests {
         println!("PK2 = {:?}", &kp2.pk.to_bytes());
         println!("PK3 = {:?}", &kp3.pk.to_bytes());
 
-        let mut pks_refs1: Vec<&PublicKey> = Vec::new();
-        pks_refs1.push(&kp1.pk);
-        pks_refs1.push(&kp2.pk);
+        let pks_refs1: Vec<&blst::min_pk::PublicKey> = vec![&kp1.pk, &kp2.pk];
         // pks_refs.push(&kp3.pk);
 
-        let agg_pk1 = match AggregatePublicKey::aggregate(&pks_refs1, false) {
+        let agg_pk1 = match blst::min_pk::AggregatePublicKey::aggregate(&pks_refs1, false) {
             Ok(agg_pk) => agg_pk,
             Err(err) => panic!("aggregate failure: {:?}", err),
         };
 
         let pk12 = agg_pk1.to_public_key();
 
-        let mut pks_refs2: Vec<&PublicKey> = Vec::new();
-        pks_refs2.push(&kp3.pk);
-        pks_refs2.push(&kp1.pk);
+        let pks_refs2: Vec<&blst::min_pk::PublicKey> = vec![&kp3.pk, &kp1.pk];
 
-        let agg_pk2 = match AggregatePublicKey::aggregate(&pks_refs2, false) {
+        let agg_pk2 = match blst::min_pk::AggregatePublicKey::aggregate(&pks_refs2, false) {
             Ok(agg_pk) => agg_pk,
             Err(err) => panic!("aggregate failure: {:?}", err),
         };
 
         let pk13 = agg_pk2.to_public_key();
 
-        let mut agg_pk_final = AggregatePublicKey::from_public_key(&pk12);
-        AggregatePublicKey::add_public_key(&mut agg_pk_final, &pk13, false).unwrap();
+        let mut agg_pk_final = blst::min_pk::AggregatePublicKey::from_public_key(&pk12);
+        blst::min_pk::AggregatePublicKey::add_public_key(&mut agg_pk_final, &pk13, false).unwrap();
 
         let pk = agg_pk_final.to_public_key();
 
@@ -1532,41 +1583,43 @@ mod sig_tests {
 
         let msg = generate_random_msg();
 
-        let mut sigs_from_nodes_part1: Vec<Signature> = Vec::new();
-        sigs_from_nodes_part1.push(kp1.sk.sign(&msg, &DST, &[]));
-        sigs_from_nodes_part1.push(kp2.sk.sign(&msg, &DST, &[]));
+        let sigs_from_nodes_part1: Vec<blst::min_pk::Signature> = vec![
+            kp1.sk.sign(&msg, &DST, &[]),
+            kp2.sk.sign(&msg, &DST, &[]),
+        ];
         println!("sig len = {}", sigs_from_nodes_part1[0].to_bytes().len());
         println!("sig len = {}", sigs_from_nodes_part1[1].to_bytes().len());
 
-        let mut sig_refs1: Vec<&Signature> = Vec::new();
+        let mut sig_refs1: Vec<&blst::min_pk::Signature> = Vec::new();
         for sig in &sigs_from_nodes_part1 {
-            sig_refs1.push(&sig);
+            sig_refs1.push(sig);
         }
 
-        let mut agg_temp1 = AggregateSignature::from_signature(&sig_refs1[0]);
-        AggregateSignature::add_signature(&mut agg_temp1, &sig_refs1[1], false).unwrap();
+        let mut agg_temp1 = blst::min_pk::AggregateSignature::from_signature(sig_refs1[0]);
+        blst::min_pk::AggregateSignature::add_signature(&mut agg_temp1, sig_refs1[1], false).unwrap();
 
         let sigg1 = agg_temp1.to_signature();
 
-        let mut sigs_from_nodes_part2: Vec<Signature> = Vec::new();
-        sigs_from_nodes_part2.push(kp1.sk.sign(&msg, &DST, &[]));
-        sigs_from_nodes_part2.push(kp3.sk.sign(&msg, &DST, &[]));
+        let sigs_from_nodes_part2: Vec<blst::min_pk::Signature> = vec![
+            kp1.sk.sign(&msg, &DST, &[]),
+            kp3.sk.sign(&msg, &DST, &[]),
+        ];
 
         println!("sig len = {}", sigs_from_nodes_part2[0].to_bytes().len());
         println!("sig len = {}", sigs_from_nodes_part2[1].to_bytes().len());
 
-        let mut sig_refs2: Vec<&Signature> = Vec::new();
+        let mut sig_refs2: Vec<&blst::min_pk::Signature> = Vec::new();
         for sig in &sigs_from_nodes_part2 {
-            sig_refs2.push(&sig);
+            sig_refs2.push(sig);
         }
 
-        let mut agg_temp2 = AggregateSignature::from_signature(&sig_refs2[0]);
-        AggregateSignature::add_signature(&mut agg_temp2, &sig_refs2[1], false).unwrap();
+        let mut agg_temp2 = blst::min_pk::AggregateSignature::from_signature(sig_refs2[0]);
+        blst::min_pk::AggregateSignature::add_signature(&mut agg_temp2, sig_refs2[1], false).unwrap();
 
         let sigg2 = agg_temp2.to_signature();
 
-        let mut agg_temp_last = AggregateSignature::from_signature(&sigg1);
-        AggregateSignature::add_signature(&mut agg_temp_last, &sigg2, false).unwrap();
+        let mut agg_temp_last = blst::min_pk::AggregateSignature::from_signature(&sigg1);
+        blst::min_pk::AggregateSignature::add_signature(&mut agg_temp_last, &sigg2, false).unwrap();
 
         let agg_final = agg_temp_last.to_signature();
         println!("@@sig len = {}", agg_final.to_bytes().len());
@@ -1576,7 +1629,7 @@ mod sig_tests {
 
         println!("res = {}", res);
 
-        assert_eq!(res, true);
+        assert!(res);
 
         //  assert_eq!(res, false);
     }
@@ -1591,13 +1644,9 @@ mod sig_tests {
         println!("PK2 = {:?}", &kp2.pk.to_bytes());
         println!("PK3 = {:?}", &kp3.pk.to_bytes());
 
-        let mut pks_refs1: Vec<&PublicKey> = Vec::new();
-        pks_refs1.push(&kp1.pk);
-        pks_refs1.push(&kp2.pk);
-        pks_refs1.push(&kp3.pk);
-        pks_refs1.push(&kp1.pk);
+        let pks_refs1: Vec<&blst::min_pk::PublicKey> = vec![&kp1.pk, &kp2.pk, &kp3.pk, &kp1.pk];
 
-        let agg_pk = match AggregatePublicKey::aggregate(&pks_refs1, false) {
+        let agg_pk = match blst::min_pk::AggregatePublicKey::aggregate(&pks_refs1, false) {
             Ok(agg_pk) => agg_pk,
             Err(err) => panic!("aggregate failure: {:?}", err),
         };
@@ -1609,41 +1658,43 @@ mod sig_tests {
 
         let msg = generate_random_msg();
 
-        let mut sigs_from_nodes_part1: Vec<Signature> = Vec::new();
-        sigs_from_nodes_part1.push(kp1.sk.sign(&msg, &DST, &[]));
-        sigs_from_nodes_part1.push(kp2.sk.sign(&msg, &DST, &[]));
+        let sigs_from_nodes_part1: Vec<blst::min_pk::Signature> = vec![
+            kp1.sk.sign(&msg, &DST, &[]),
+            kp2.sk.sign(&msg, &DST, &[]),
+        ];
         println!("sig len = {}", sigs_from_nodes_part1[0].to_bytes().len());
         println!("sig len = {}", sigs_from_nodes_part1[1].to_bytes().len());
 
-        let mut sig_refs1: Vec<&Signature> = Vec::new();
+        let mut sig_refs1: Vec<&blst::min_pk::Signature> = Vec::new();
         for sig in &sigs_from_nodes_part1 {
-            sig_refs1.push(&sig);
+            sig_refs1.push(sig);
         }
 
-        let mut agg_temp1 = AggregateSignature::from_signature(&sig_refs1[0]);
-        AggregateSignature::add_signature(&mut agg_temp1, &sig_refs1[1], false).unwrap();
+        let mut agg_temp1 = blst::min_pk::AggregateSignature::from_signature(sig_refs1[0]);
+        blst::min_pk::AggregateSignature::add_signature(&mut agg_temp1, sig_refs1[1], false).unwrap();
 
         let sigg1 = agg_temp1.to_signature();
 
-        let mut sigs_from_nodes_part2: Vec<Signature> = Vec::new();
-        sigs_from_nodes_part2.push(kp1.sk.sign(&msg, &DST, &[]));
-        sigs_from_nodes_part2.push(kp3.sk.sign(&msg, &DST, &[]));
+        let sigs_from_nodes_part2: Vec<blst::min_pk::Signature> = vec![
+            kp1.sk.sign(&msg, &DST, &[]),
+            kp3.sk.sign(&msg, &DST, &[]),
+        ];
 
         println!("sig len = {}", sigs_from_nodes_part2[0].to_bytes().len());
         println!("sig len = {}", sigs_from_nodes_part2[1].to_bytes().len());
 
-        let mut sig_refs2: Vec<&Signature> = Vec::new();
+        let mut sig_refs2: Vec<&blst::min_pk::Signature> = Vec::new();
         for sig in &sigs_from_nodes_part2 {
-            sig_refs2.push(&sig);
+            sig_refs2.push(sig);
         }
 
-        let mut agg_temp2 = AggregateSignature::from_signature(&sig_refs2[0]);
-        AggregateSignature::add_signature(&mut agg_temp2, &sig_refs2[1], false).unwrap();
+        let mut agg_temp2 = blst::min_pk::AggregateSignature::from_signature(sig_refs2[0]);
+        blst::min_pk::AggregateSignature::add_signature(&mut agg_temp2, sig_refs2[1], false).unwrap();
 
         let sigg2 = agg_temp2.to_signature();
 
-        let mut agg_temp_last = AggregateSignature::from_signature(&sigg1);
-        AggregateSignature::add_signature(&mut agg_temp_last, &sigg2, false).unwrap();
+        let mut agg_temp_last = blst::min_pk::AggregateSignature::from_signature(&sigg1);
+        blst::min_pk::AggregateSignature::add_signature(&mut agg_temp_last, &sigg2, false).unwrap();
 
         let agg_final = agg_temp_last.to_signature();
         println!("@@sig len = {}", agg_final.to_bytes().len());
@@ -1653,7 +1704,7 @@ mod sig_tests {
 
         println!("res = {}", res);
 
-        assert_eq!(res, true);
+        assert!(res);
     }
 
     #[test]
@@ -1693,7 +1744,7 @@ mod sig_tests {
         let res = BlsSignature::simple_verify(&acc_sig_new.sig_bytes, &msg, &kp.pk_bytes).unwrap();
 
         println!("res = {}", res);
-        assert_eq!(res, true);
+        assert!(res);
     }
 
     #[test]
@@ -1725,7 +1776,7 @@ mod sig_tests {
         let a1 = [0xC0];
         let a2 = [0; 47];
 
-        let whole: Vec<u8> = a1.iter().chain(a2.iter()).map(|v| *v).collect();
+        let whole: Vec<u8> = a1.iter().chain(a2.iter()).copied().collect();
         let whole: [u8; 48] = whole.try_into().unwrap();
         println!("{:?}", whole);
 
@@ -1733,11 +1784,33 @@ mod sig_tests {
        // println!("{}",err.unwrap().to_string());
 
 
-        let mut pks: Vec<PublicKey> = Vec::new();
-        pks.push(pk);
+        let pks: Vec<blst::min_pk::PublicKey> = vec![pk];
 
-        let pk_refs: Vec<&PublicKey> = pks.iter().map(|pk| pk).collect();
-        let err = AggregatePublicKey::aggregate(&pk_refs, true).err();
+        let pk_refs: Vec<&blst::min_pk::PublicKey> = pks.iter().collect();
+        let err = blst::min_pk::AggregatePublicKey::aggregate(&pk_refs, true).err();
         assert!(err.is_some());
     }
+}
+
+#[test]
+fn test_bls_pairing() -> Result<()> {
+
+    let p = generate_random_msg_of_fixed_len(BLS_G1_LEN as i32);
+    let g1 = map_to_g1(p.as_slice().try_into()?);
+
+    let p = generate_random_msg_of_fixed_len(BLS_G2_LEN as i32);
+    let g2 = map_to_g2(p.as_slice().try_into()?);
+
+    let s1 = generate_random_msg_of_fixed_len(BLS_SCALAR_LEN as i32);
+
+    let m1 = g1_mul(&g1, &s1.as_slice().try_into()?)?;
+    let g1_points = [&m1, &g1];
+
+    let m2 = g2_mul(&g2, &s1.as_slice().try_into()?)?;
+    let m2 = g2_neg(&m2)?;
+    let g2_points = [&g2, &m2];
+
+    assert!(pairing(&g1_points, &g2_points)?);
+
+    Ok(())
 }

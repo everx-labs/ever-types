@@ -222,14 +222,14 @@ pub struct BlsKeyOption {
 }
 
 impl BlsKeyOption {
-    pub const KEY_TYPE: i32 = 007;
+    pub const KEY_TYPE: i32 = 7;
 
     pub fn generate_with_json() -> Result<(KeyOptionJson, Arc<dyn KeyOption>)> {
         let key = Self::generate()?;
         let json = KeyOptionJson {
             type_id: Self::KEY_TYPE,
-            pub_key: Some(base64::encode(&key.pub_key)),
-            pvt_key: key.pvt_key.map(|val| base64::encode(val))
+            pub_key: Some(base64::encode(key.pub_key)),
+            pvt_key: key.pvt_key.map(base64::encode)
         };
 
         Ok((json, Arc::new(key)))
@@ -239,7 +239,7 @@ impl BlsKeyOption {
         let (pub_key, pvt_key) = super::bls::gen_bls_key_pair_based_on_key_material(ikm)?;
         Ok(Self {
             id: Self::calc_id(&pub_key),
-            pub_key: pub_key,
+            pub_key,
             pvt_key: Some(pvt_key)
         })
     }
@@ -263,7 +263,7 @@ impl BlsKeyOption {
 
         Ok(Arc::new(Self {
             id: Self::calc_id(&pub_key),
-             pub_key: pub_key,
+            pub_key,
             pvt_key: Some(pvt_key)
         }))
     }
@@ -272,7 +272,7 @@ impl BlsKeyOption {
         Arc::new(
             Self {
                 id: Self::calc_id(&pub_key), 
-                pub_key: pub_key, 
+                pub_key, 
                 pvt_key: None
             }
         )
@@ -282,7 +282,7 @@ impl BlsKeyOption {
         let (pub_key, pvt_key) = super::bls::gen_bls_key_pair()?;
         Ok(Self {
             id: Self::calc_id(&pub_key),
-            pub_key: pub_key,
+            pub_key,
             pvt_key: Some(pvt_key)
         })
     }
@@ -317,15 +317,15 @@ impl KeyOption for BlsKeyOption {
 
     /// Calculate simple signature
     fn sign(&self, data: &[u8]) -> Result<Vec<u8>> {
-        let sign = super::bls::sign(self.pvt_key()?, &data.to_vec())?;
-        Ok(sign.try_into()?)
+        let sign = super::bls::sign(self.pvt_key()?, data)?;
+        Ok(sign.into())
     }
 
     /// Verify signature
     fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()> {
         let status = super::bls::verify(
             signature.try_into()?, 
-            &data.to_vec(), &self.pub_key
+            data, &self.pub_key
         )?;
 
         if !status {
