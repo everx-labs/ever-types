@@ -1,6 +1,6 @@
 # WARNING! This repository is obsolete
 
-Data types for Everscale/Venom blockchains were merged repository https://github.com/tonlabs/ever-block.git
+Data types for Everscale/Venom blockchains were merged into the repository https://github.com/tonlabs/ever-block.git
 
 # ever-types
 
