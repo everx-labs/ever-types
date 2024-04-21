@@ -1,5 +1,5 @@
 /*
-* Copyright (C) 2019-2022 TON Labs. All Rights Reserved.
+* Copyright (C) 2019-2023 EverX Rights Reserved.
 *
 * Licensed under the SOFTWARE EVALUATION License (the "License"); you may not use
 * this file except in compliance with the License.
@@ -7,19 +7,18 @@
 * Unless required by applicable law or agreed to in writing, software
 * distributed under the License is distributed on an "AS IS" BASIS,
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific TON DEV software governing permissions and
+* See the License for the specific EVERX DEV software governing permissions and
 * limitations under the License.
 */
 
-use crate::cell::{BuilderData, SliceData};
+use crate::{cell::{BuilderData, SliceData}, base64_decode_to_slice, sha256_digest};
 use num::FromPrimitive;
-use sha2::Digest;
 use std::{cmp, convert::TryInto, fmt, fmt::{LowerHex, UpperHex}, str::{self, FromStr}};
 use smallvec::SmallVec;
 
 pub type Error = failure::Error;
-pub type Result<T> = std::result::Result<T, failure::Error>;
-pub type Failure = Option<failure::Error>;
+pub type Result<T> = std::result::Result<T, Error>;
+pub type Failure = Option<Error>;
 pub type Status = Result<()>;
 
 #[macro_export]
@@ -107,12 +106,16 @@ impl UInt256 {
 
     // TODO: usage should be changed to as_hex_string
     #[allow(clippy::wrong_self_convention)]
-    pub fn to_hex_string(&self) -> String { self.as_hex_string() }
+    pub fn to_hex_string(&self) -> String { 
+        self.as_hex_string()
+    }
 
-    pub fn calc_file_hash(bytes: &[u8]) -> Self { Self::calc_sha256(bytes) }
+    pub fn calc_file_hash(bytes: &[u8]) -> Self { 
+        Self::calc_sha256(bytes)
+    }
 
     pub fn calc_sha256(bytes: &[u8]) -> Self {
-        Self(sha2::Sha256::digest(bytes).into())
+        Self(sha256_digest(bytes))
     }
 
     pub fn first_u64(&self) -> u64 {
@@ -184,7 +187,7 @@ impl From<&[u8; 32]> for UInt256 {
 }
 
 impl From<&[u8]> for UInt256 {
-    fn from(value: &[u8]) -> Self { Self::from_le_bytes(value) }
+    fn from(value: &[u8]) -> Self { Self::from_slice(value) }
 }
 
 impl From<Vec<u8>> for UInt256 {
@@ -197,18 +200,16 @@ impl From<Vec<u8>> for UInt256 {
 }
 
 impl FromStr for UInt256 {
-    type Err = failure::Error;
+    type Err = Error;
     fn from_str(value: &str) -> Result<Self> {
-        let bytes = match value.len() {
-            64 => hex::decode(value)?,
-            66 => hex::decode(&value[2..])?,
-            44 => base64::decode(value)?,
-            len => fail!("invalid account ID string length (64 expected), but got {} for string {}", len, value)
-        };
-        match bytes.try_into() {
-            Ok(bytes) => Ok(Self(bytes)),
-            Err(bytes) => fail!("array length is {} for {}", bytes.len(), value)
+        let mut result = Self::default();
+        match value.len() {
+            64 => hex::decode_to_slice(value, &mut result.0)?,
+            66 => hex::decode_to_slice(&value[2..], &mut result.0)?,
+            44 => base64_decode_to_slice(value, &mut result.0)?,
+            _ => fail!("invalid account ID string (32 bytes expected), but got string {}", value)
         }
+        Ok(result)
     }
 }
 
@@ -280,7 +281,7 @@ impl From<&UInt256> for AccountId {
 }
 
 impl FromStr for AccountId {
-    type Err = failure::Error;
+    type Err = Error;
     fn from_str(s: &str) -> Result<Self> {
         let uint: UInt256 = FromStr::from_str(s)?;
         Ok(AccountId::from(uint.0))
@@ -322,7 +323,9 @@ pub enum ExceptionCode {
     #[fail(display = "illegal instruction")]
     IllegalInstruction = 14,
     #[fail(display = "pruned cell")]
-    PrunedCellAccess = 15
+    PrunedCellAccess = 15,
+    #[fail(display = "big cell")]
+    BigCellAccess = 16
 }
 
 /*
@@ -362,6 +365,7 @@ impl ExceptionCode {
 
 pub trait ByteOrderRead {
     fn read_be_uint(&mut self, bytes: usize) -> std::io::Result<u64>;
+    fn read_le_uint(&mut self, bytes: usize) -> std::io::Result<u64>;
     fn read_byte(&mut self) -> std::io::Result<u8>;
     fn read_be_u16(&mut self) -> std::io::Result<u16>;
     fn read_be_u32(&mut self) -> std::io::Result<u32>;
@@ -374,29 +378,11 @@ pub trait ByteOrderRead {
 
 impl<T: std::io::Read> ByteOrderRead for T {
     fn read_be_uint(&mut self, bytes: usize) -> std::io::Result<u64> {
-        match bytes {
-            1 => {
-                let mut buf = [0];
-                self.read_exact(&mut buf)?;
-                Ok(buf[0] as u64)
-            }
-            2 => {
-                let mut buf = [0; 2];
-                self.read_exact(&mut buf)?;
-                Ok(u16::from_be_bytes(buf) as u64)
-            }
-            3..=4 => {
-                let mut buf = [0; 4];
-                self.read_exact(&mut buf[4 - bytes..])?;
-                Ok(u32::from_be_bytes(buf) as u64)
-            },
-            5..=8 => {
-                let mut buf = [0; 8];
-                self.read_exact(&mut buf[8 - bytes..])?;
-                Ok(u64::from_be_bytes(buf))
-            },
-            _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "too many bytes to read in u64")),
-        }
+        read_uint(self, bytes, false)
+    }
+
+    fn read_le_uint(&mut self, bytes: usize) -> std::io::Result<u64> {
+        read_uint(self, bytes, true)
     }
 
     fn read_byte(&mut self) -> std::io::Result<u8> {
@@ -440,5 +426,51 @@ impl<T: std::io::Read> ByteOrderRead for T {
     }
 }
 
+fn read_uint<T: std::io::Read>(src: &mut T, bytes: usize, le: bool) -> std::io::Result<u64> {
+    match bytes {
+        1 => {
+            let mut buf = [0];
+            src.read_exact(&mut buf)?;
+            Ok(buf[0] as u64)
+        }
+        2 => {
+            let mut buf = [0; 2];
+            src.read_exact(&mut buf)?;
+            if le {
+                Ok(u16::from_le_bytes(buf) as u64)
+            } else {
+                Ok(u16::from_be_bytes(buf) as u64)
+            }
+        }
+        3..=4 => {
+            let mut buf = [0; 4];
+            if le {
+                src.read_exact(&mut buf[0..bytes])?;
+                Ok(u32::from_le_bytes(buf) as u64)
+            } else {
+                src.read_exact(&mut buf[4 - bytes..])?;
+                Ok(u32::from_be_bytes(buf) as u64)
+            }
+        },
+        5..=8 => {
+            let mut buf = [0; 8];
+            if le {
+                src.read_exact(&mut buf[0..bytes])?;
+                Ok(u64::from_le_bytes(buf))
+            } else {
+                src.read_exact(&mut buf[8 - bytes..])?;
+                Ok(u64::from_be_bytes(buf))
+            }
+        },
+        n => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("too many bytes ({}) to read in u64", n),
+        )),
+    }
+}
+
 pub type Bitmask = u8;
 
+#[cfg(test)]
+#[path = "tests/test_types.rs"]
+mod tests;

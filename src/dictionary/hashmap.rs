@@ -1,5 +1,5 @@
 /*
-* Copyright (C) 2019-2021 TON Labs. All Rights Reserved.
+* Copyright (C) 2019-2023 EverX. All Rights Reserved.
 *
 * Licensed under the SOFTWARE EVALUATION License (the "License"); you may not use
 * this file except in compliance with the License.
@@ -7,7 +7,7 @@
 * Unless required by applicable law or agreed to in writing, software
 * distributed under the License is distributed on an "AS IS" BASIS,
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific TON DEV software governing permissions and
+* See the License for the specific EVERX DEV software governing permissions and
 * limitations under the License.
 */
 
@@ -63,7 +63,7 @@ impl HashmapE {
     /// deserialize not empty root
     pub fn read_hashmap_root(&mut self, slice: &mut SliceData) -> Result<()> {
         let mut root = slice.clone();
-        let label = slice.get_label(self.bit_len)?;
+        let label = LabelReader::read_label(slice, self.bit_len)?;
         if label.remaining_bits() != self.bit_len {
             slice.shrink_references(2..);
             root.shrink_by_remainder(slice);
@@ -88,25 +88,25 @@ impl HashmapE {
     }
     /// sets value as SliceData
     pub fn set(&mut self, key: SliceData, value: &SliceData) -> Leaf {
-        self.hashmap_set_with_mode(key, &BuilderData::from_slice(value), &mut 0, ADD | REPLACE)
+        self.hashmap_set_with_mode(key, &value.as_builder(), &mut 0, ADD | REPLACE)
     }
     pub fn set_builder(&mut self, key: SliceData, value: &BuilderData) -> Leaf {
         self.hashmap_set_with_mode(key, value, &mut 0, ADD | REPLACE)
     }
     pub fn set_with_gas(&mut self, key: SliceData, value: &SliceData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
-        self.hashmap_set_with_mode(key, &BuilderData::from_slice(value), gas_consumer, ADD | REPLACE)
+        self.hashmap_set_with_mode(key, &value.as_builder(), gas_consumer, ADD | REPLACE)
     }
     pub fn set_builder_with_gas(&mut self, key: SliceData, value: &BuilderData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
         self.hashmap_set_with_mode(key, value, gas_consumer, ADD | REPLACE)
     }
     pub fn replace_with_gas(&mut self, key: SliceData, value: &SliceData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
-        self.hashmap_set_with_mode(key, &BuilderData::from_slice(value), gas_consumer, REPLACE)
+        self.hashmap_set_with_mode(key, &value.as_builder(), gas_consumer, REPLACE)
     }
     pub fn replace_builder_with_gas(&mut self, key: SliceData, value: &BuilderData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
         self.hashmap_set_with_mode(key, value, gas_consumer, REPLACE)
     }
     pub fn add_with_gas(&mut self, key: SliceData, value: &SliceData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
-        self.hashmap_set_with_mode(key, &BuilderData::from_slice(value), gas_consumer, ADD)
+        self.hashmap_set_with_mode(key, &value.as_builder(), gas_consumer, ADD)
     }
     pub fn add_builder_with_gas(&mut self, key: SliceData, value: &BuilderData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
         self.hashmap_set_with_mode(key, value, gas_consumer, ADD)
@@ -237,3 +237,6 @@ impl IntoIterator for &HashmapE {
     }
 }
 
+#[cfg(test)]
+#[path = "tests/test_hashmap.rs"]
+mod tests;

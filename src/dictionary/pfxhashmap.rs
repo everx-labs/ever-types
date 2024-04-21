@@ -1,5 +1,5 @@
 /*
-* Copyright (C) 2019-2021 TON Labs. All Rights Reserved.
+* Copyright (C) 2019-2023 EverX. All Rights Reserved.
 *
 * Licensed under the SOFTWARE EVALUATION License (the "License"); you may not use
 * this file except in compliance with the License.
@@ -7,13 +7,13 @@
 * Unless required by applicable law or agreed to in writing, software
 * distributed under the License is distributed on an "AS IS" BASIS,
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific TON DEV software governing permissions and
+* See the License for the specific EVERX DEV software governing permissions and
 * limitations under the License.
 */
 
 use std::fmt;
 
-use crate::GasConsumer;
+use crate::{GasConsumer, LabelReader};
 use crate::types::Result;
 
 use super::{ADD, HashmapRemover, HashmapType, hm_label, Leaf, REPLACE};
@@ -53,19 +53,19 @@ impl PfxHashmapE {
     }
     /// sets value as SliceData
     pub fn set(&mut self, key: SliceData, value: &SliceData) -> Leaf {
-        self.hashmap_set_with_mode(key, &BuilderData::from_slice(value), &mut 0, ADD | REPLACE)
+        self.hashmap_set_with_mode(key, &value.as_builder(), &mut 0, ADD | REPLACE)
     }
     pub fn set_builder(&mut self, key: SliceData, value: &BuilderData) -> Leaf {
         self.hashmap_set_with_mode(key, value, &mut 0, ADD | REPLACE)
     }
     pub fn set_with_gas(&mut self, key: SliceData, value: &SliceData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
-        self.hashmap_set_with_mode(key, &BuilderData::from_slice(value), gas_consumer, ADD | REPLACE)
+        self.hashmap_set_with_mode(key, &value.as_builder(), gas_consumer, ADD | REPLACE)
     }
     pub fn set_builder_with_gas(&mut self, key: SliceData, value: &BuilderData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
         self.hashmap_set_with_mode(key, value, gas_consumer, ADD | REPLACE)
     }
     pub fn replace_with_gas(&mut self, key: SliceData, value: &SliceData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
-        self.hashmap_set_with_mode(key, &BuilderData::from_slice(value), gas_consumer, REPLACE)
+        self.hashmap_set_with_mode(key, &value.as_builder(), gas_consumer, REPLACE)
     }
     pub fn replace_builder_with_gas(&mut self, key: SliceData, value: &BuilderData, gas_consumer: &mut dyn GasConsumer) -> Leaf {
         self.hashmap_set_with_mode(key, value, gas_consumer, REPLACE)
@@ -94,7 +94,7 @@ impl PfxHashmapE {
             Some(root) if !key.is_empty() => SliceData::load_cell_ref(root)?,
             _ => return Ok(false)
         };
-        let mut label = cursor.get_label(bit_len)?;
+        let mut label = LabelReader::read_label(&mut cursor, bit_len)?;
         loop {
             match SliceData::common_prefix(&label, &key) {
                 (_, None, None) => (), // label == key
@@ -113,7 +113,7 @@ impl PfxHashmapE {
             }
             cursor = SliceData::load_cell(cursor.reference(next_index)?)?;
             bit_len -= label.remaining_bits() + 1;
-            label = cursor.get_label(bit_len)?;
+            label = LabelReader::read_label(&mut cursor, bit_len)?;
         }
     }
     /// finds item in PfxHashmap which key is prefix of key and returns value with path and suffix
@@ -124,32 +124,32 @@ impl PfxHashmapE {
             _ => return Ok((SliceData::default(), None, key))
         };
         let mut path =  BuilderData::default();
-        let mut label = cursor.get_label(bit_len)?;
+        let mut label = LabelReader::read_label(&mut cursor, bit_len)?;
         loop {
-            path.checked_append_references_and_data(&label)?;
+            path.append_bytestring(&label)?;
             match SliceData::common_prefix(&label, &key) {
                 (_, None, None) => { // label == key
                     key.shrink_data(..0);
                 }
                 (_, None, Some(remainder)) => key = remainder, // usual case
-                (_, _, None) => return Ok((SliceData::load_builder(path)?, None, SliceData::default())), // key is prefix
-                (_, Some(_), Some(remainder)) => return Ok((SliceData::load_builder(path)?, None, remainder))
+                (_, _, None) => return Ok((SliceData::load_bitstring(path)?, None, SliceData::default())), // key is prefix
+                (_, Some(_), Some(remainder)) => return Ok((SliceData::load_bitstring(path)?, None, remainder))
             }
             if Self::is_leaf(&mut cursor) {
-                return Ok((SliceData::load_builder(path)?, Some(cursor), key))
+                return Ok((SliceData::load_bitstring(path)?, Some(cursor), key))
             } else if key.is_empty() {
-                return Ok((SliceData::load_builder(path)?, None, key))
+                return Ok((SliceData::load_bitstring(path)?, None, key))
             }
             let next_index = key.get_next_bit_int()?;
             if next_index >= cursor.remaining_references()
                 || bit_len < label.remaining_bits() + 1 {
                 debug_assert!(false);
-                return Ok((SliceData::load_builder(path)?, None, key)) // problem
+                return Ok((SliceData::load_bitstring(path)?, None, key)) // problem
             }
             path.append_bit_bool(next_index == 1)?;
             cursor = gas_consumer.load_cell(cursor.reference(next_index)?)?;
             bit_len -= label.remaining_bits() + 1;
-            label = cursor.get_label(bit_len)?;
+            label = LabelReader::read_label(&mut cursor, bit_len)?;
         }
     }
     #[allow(dead_code)]
@@ -160,7 +160,7 @@ impl PfxHashmapE {
             _ => return Ok((SliceData::default(), None, key))
         };
         let mut path = BuilderData::default();
-        let mut label = cursor.get_label(bit_len)?;
+        let mut label = LabelReader::read_label(&mut cursor, bit_len)?;
         loop {
             path.checked_append_references_and_data(&label)?;
             match SliceData::common_prefix(&label, &key) {
@@ -169,38 +169,38 @@ impl PfxHashmapE {
                 }
                 (_, None, Some(remainder)) => key = remainder, // usual case
                 (_, _, None) => break, // key is prefix
-                (_, Some(_), Some(remainder)) => return Ok((SliceData::load_builder(path)?, None, remainder))
+                (_, Some(_), Some(remainder)) => return Ok((SliceData::load_bitstring(path)?, None, remainder))
             }
             if Self::is_leaf(&mut cursor) {
-                return Ok((SliceData::load_builder(path)?, Some(cursor), key))
+                return Ok((SliceData::load_bitstring(path)?, Some(cursor), key))
             }
             let next_index = key.get_next_bit_int()?;
             if next_index >= cursor.remaining_references()
                 || bit_len < label.remaining_bits() + 1 {
                 debug_assert!(false);
-                return Ok((SliceData::load_builder(path)?, None, key)) // problem
+                return Ok((SliceData::load_bitstring(path)?, None, key)) // problem
             }
             path.append_bit_bool(next_index == 1)?;
             cursor = SliceData::load_cell(cursor.reference(next_index)?)?;
             bit_len -= label.remaining_bits() + 1;
-            label = cursor.get_label(bit_len)?;
+            label = LabelReader::read_label(&mut cursor, bit_len)?;
         }
         key = SliceData::default();
         loop {
             if Self::is_leaf(&mut cursor) {
-                return Ok((SliceData::load_builder(path)?, Some(cursor), key))
+                return Ok((SliceData::load_bitstring(path)?, Some(cursor), key))
             }
             let next_index = 0;
             if next_index >= cursor.remaining_references() {
-                return Ok((SliceData::load_builder(path)?, None, key)) // problem
+                return Ok((SliceData::load_bitstring(path)?, None, key)) // problem
             }
             path.append_bit_bool(next_index == 1)?;
             cursor = SliceData::load_cell(cursor.reference(next_index)?)?;
             if bit_len < label.remaining_bits() + 1 {
-                return Ok((SliceData::load_builder(path)?, None, key)) // problem
+                return Ok((SliceData::load_bitstring(path)?, None, key)) // problem
             }
             bit_len -= label.remaining_bits() + 1;
-            label = cursor.get_label(bit_len)?;
+            label = LabelReader::read_label(&mut cursor, bit_len)?;
             path.checked_append_references_and_data(&label)?;
         }
     }
@@ -273,3 +273,6 @@ impl HashmapType for PfxHashmapE {
 
 impl HashmapRemover for PfxHashmapE {}
 
+#[cfg(test)]
+#[path = "tests/test_pfxhashmap.rs"]
+mod tests;

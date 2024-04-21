@@ -1,5 +1,5 @@
 /*
-* Copyright (C) 2019-2023 TON Labs. All Rights Reserved.
+* Copyright (C) 2019-2023 EverX. All Rights Reserved.
 *
 * Licensed under the SOFTWARE EVALUATION License (the "License"); you may not use
 * this file except in compliance with the License.
@@ -7,7 +7,7 @@
 * Unless required by applicable law or agreed to in writing, software
 * distributed under the License is distributed on an "AS IS" BASIS,
 * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-* See the License for the specific TON DEV software governing permissions and
+* See the License for the specific EVERX DEV software governing permissions and
 * limitations under the License.
 */
 
@@ -129,7 +129,7 @@ impl IBitstring for BuilderData {
             8..=15 => self.append_raw(&((value as u16) << (16 - bits)).to_be_bytes(), bits),
             16..=31 => self.append_raw(&((value as u32) << (32 - bits)).to_be_bytes(), bits),
             32..=63 => self.append_raw(&((value as u64) << (64 - bits)).to_be_bytes(), bits),
-            bits => unimplemented!("bits: {}", bits)
+            bits => fail!("bits: {}", bits)
         }
     }
     fn append_u8(&mut self, value: u8) -> Result<&mut Self> {
@@ -164,3 +164,6 @@ impl IBitstring for BuilderData {
     }
 }
 
+#[cfg(test)]
+#[path = "tests/test_builder.rs"]
+mod tests;
